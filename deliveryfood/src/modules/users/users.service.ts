@@ -1,0 +1,342 @@
+// src/modules/users/users.service.ts
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { CreateUserDto } from './dto/create-user.dto';
+import { UpdateUserDto } from './dto/update-user.dto';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
+import { User } from './schemas/user.schema';
+import { hashPasswordHelper } from '@/helpers/util';
+import aqp from 'api-query-params';
+import mongoose from 'mongoose';
+import { CreateAuthDto } from '@/auth/dto/create-auth.dto';
+import dayjs from 'dayjs';
+import { v4 as uuidv4 } from 'uuid';
+import { MailerService } from '@nestjs-modules/mailer';
+import * as bcrypt from 'bcrypt';
+import { plainToInstance } from 'class-transformer';
+import { UserProfileDto } from './dto/user-profile.dto';
+import { randomBytes } from 'crypto';
+
+@Injectable()
+export class UsersService {
+  constructor(
+    @InjectModel(User.name)
+    private userModel: Model<User>,
+    private readonly mailerService: MailerService,
+  ) {}
+
+  async isEmailExist(email: string) {
+    const user = await this.userModel.exists({ email });
+    return !!user;
+  }
+
+  async create(createUserDto: CreateUserDto) {
+    const { name, email, password, phone, address, image } = createUserDto;
+
+    const isExist = await this.isEmailExist(email);
+    if (isExist) {
+      throw new BadRequestException(`Email đã tồn tại: ${email}. Vui lòng sử dụng email khác`);
+    }
+
+    const hashPassword = await hashPasswordHelper(password);
+    const user = await this.userModel.create({
+      name,
+      email,
+      password: hashPassword,
+      phone,
+      address,
+      image,
+    });
+
+    return { _id: user._id };
+  }
+
+  async findAll(
+    query: string,
+    current = 1,
+    pageSize = 10,
+    role?: string,
+  ): Promise<{ results: User[]; totalPages: number }> {
+    const { filter: rawFilter, sort: rawSort } = aqp(query);
+
+    // Loại bỏ pageSize, current khỏi filter
+    const { current: _c, pageSize: _p, ...filter } = rawFilter;
+
+    // Thêm điều kiện lọc theo role nếu có
+    if (role) {
+      filter.role = role;
+    }
+
+    // Chuyển sort về kiểu đúng
+    const parsedSort: Record<string, any> = rawSort || {};
+    const sort: Record<string, 1 | -1> = {};
+
+    for (const key in parsedSort) {
+      const value = Number(parsedSort[key]);
+      if (value === 1 || value === -1) {
+        sort[key] = value;
+      }
+    }
+
+    const totalItems = await this.userModel.countDocuments(filter);
+    const totalPages = Math.ceil(totalItems / pageSize);
+    const skip = (current - 1) * pageSize;
+
+    const results = await this.userModel
+      .find(filter)
+      .limit(pageSize)
+      .skip(skip)
+      .select('-password')
+      .sort(sort);
+
+    return { results, totalPages };
+  }
+
+  async findByEmail(email: string){
+    return await this.userModel.findOne({ email });
+  }
+
+  async findOne(id: string): Promise<UserProfileDto> {
+    if (!mongoose.isValidObjectId(id)) {
+      throw new BadRequestException('Id không đúng định dạng');
+    }
+
+    const user = await this.userModel
+      .findById(id)
+      .select('-password -refreshToken -activationCode -activationCodeExpiry -activationToken -activationTokenExpiry -resetCode -resetCodeExpire');
+
+    if (!user) {
+      throw new NotFoundException('Không tìm thấy người dùng');
+    }
+
+    // Convert Document -> DTO
+    return plainToInstance(UserProfileDto, user.toObject());
+  }
+
+  async update(id: string, dto: UpdateUserDto) {
+    if (!mongoose.isValidObjectId(id)) {
+      throw new BadRequestException('Id không đúng định dạng');
+    }
+    const result = await this.userModel.updateOne({ _id: id }, { ...dto });
+
+    if (result.matchedCount === 0) {
+      throw new NotFoundException('Không tìm thấy người dùng');
+    }
+
+    return { message: 'Cập nhật thành công' };
+  }
+
+  // Activate user: clear both numeric code and token flows
+  async activateUser(userId: string) {
+    return await this.userModel.findByIdAndUpdate(
+      userId,
+      {
+        isActive: true,
+        activationCode: null,
+        activationCodeExpiry: null,
+        activationToken: null,
+        activationTokenExpiry: null,
+        activatedAt: new Date(),
+      },
+      { new: true }
+    );
+  }
+
+  // Legacy numeric code updater (kept for backward compatibility)
+  async updateActivationCode(userId: string, activationCode: string, expiry: Date) {
+    return await this.userModel.findByIdAndUpdate(
+      userId,
+      {
+        activationCode,
+        activationCodeExpiry: expiry,
+      },
+      { new: true }
+    );
+  }
+
+  // NEW: store activation token (link flow)
+  async updateActivationToken(userId: string, token: string, expiry: Date) {
+    return await this.userModel.findByIdAndUpdate(
+      userId,
+      {
+        activationToken: token,
+        activationTokenExpiry: expiry,
+        // optional: clear numeric code so only one flow is valid at a time
+        activationCode: null,
+        activationCodeExpiry: null,
+      },
+      { new: true }
+    );
+  }
+
+  // NEW: find by activation token (not expired)
+  async findByActivationToken(token: string) {
+    return this.userModel.findOne({
+      activationToken: token,
+      activationTokenExpiry: { $gt: new Date() },
+    });
+  }
+
+  async remove(_id: string) {
+    if (!mongoose.isValidObjectId(_id)) {
+      throw new BadRequestException('Id không đúng định dạng');
+    }
+
+    const result = await this.userModel.deleteOne({ _id });
+
+    if (result.deletedCount === 0) {
+      throw new NotFoundException('Không tìm thấy người dùng để xoá');
+    }
+
+    return { message: 'Xoá thành công' };
+  }
+
+  async changeRole(id: string, role: string) {
+    if (!mongoose.isValidObjectId(id)) {
+      throw new BadRequestException('Id không đúng định dạng');
+    }
+    await this.userModel.updateOne({ _id: id }, { role });
+    return { message: 'Đổi role thành công' };
+  }
+
+  async requestPasswordReset(email: string) {
+    const user = await this.userModel.findOne({ email });
+    if (!user) {
+      throw new BadRequestException('Email không tồn tại');
+    }
+
+    const resetCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const codeExpired = dayjs().add(10, 'minutes').toDate();
+
+    await this.userModel.updateOne({ _id: user._id }, { resetCode, codeExpired });
+
+    await this.mailerService.sendMail({
+      to: email,
+      subject: 'Mã xác nhận đặt lại mật khẩu',
+      template: 'reset-password-code',
+      context: {
+        name: user.name,
+        code: resetCode,
+      },
+    });
+
+    return { message: 'Đã gửi email reset password' };
+  }
+
+  async verifyResetCode(email: string, code: string) {
+    const user = await this.userModel.findOne({ email, resetCode: code });
+
+    if (!user) {
+      throw new BadRequestException('Mã xác nhận không đúng');
+    }
+
+    if (user.codeExpired < new Date()) {
+      throw new BadRequestException('Mã xác nhận đã hết hạn');
+    }
+
+    return { message: 'Mã xác nhận hợp lệ' };
+  }
+
+  async resetPassword(code: string, newPassword: string) {
+    const user = await this.userModel.findOne({ resetCode: code });
+
+    if (!user) {
+      throw new BadRequestException('Mã xác nhận không hợp lệ');
+    }
+
+    if (user.codeExpired < new Date()) {
+      throw new BadRequestException('Mã xác nhận đã hết hạn');
+    }
+
+    const hashed = await hashPasswordHelper(newPassword);
+    await this.userModel.updateOne(
+      { _id: user._id },
+      { password: hashed, resetCode: null, codeExpired: null }
+    );
+
+    return { message: 'Đổi mật khẩu thành công' };
+  }
+
+  async saveRefreshToken(userId: string, refreshToken: string, expiry: Date) {
+    return this.userModel.findByIdAndUpdate(
+      userId,
+      {
+        refreshToken,
+        refreshTokenExpiry: expiry,
+      },
+      { new: true }
+    );
+  }
+
+  async findById(userId: string): Promise<User | null> {
+    return this.userModel.findById(userId).exec();
+  }
+
+  async removeRefreshToken(userId: string) {
+    return this.userModel.findByIdAndUpdate(
+      userId,
+      { $unset: { refreshToken: "", refreshTokenExpiry: "" } },
+      { new: true }
+    );
+  }
+
+  async changePassword(userId: string, oldPassword: string, newPassword: string) {
+    const user = await this.userModel.findById(userId);
+
+    if (!user) {
+      throw new BadRequestException('User not found');
+    }
+
+    const isMatch = await bcrypt.compare(oldPassword, user.password);
+    if (!isMatch) {
+      throw new BadRequestException('Old password is incorrect');
+    }
+
+    const hashedNewPassword = await hashPasswordHelper(newPassword);
+    await this.userModel.updateOne(
+      { _id: userId },
+      { password: hashedNewPassword }
+    );
+
+    return { message: 'Password changed successfully' };
+  }
+
+  // UPDATED: register flow now issues activation LINK (token) by default
+  async handleRegister(registerDto: CreateAuthDto) {
+    const { name, email, password } = registerDto;
+
+    const isExist = await this.isEmailExist(email);
+    if (isExist) {
+      throw new BadRequestException(`Email đã tồn tại: ${email}. Vui lòng sử dụng email khác`);
+    }
+
+    const hashPassword = await hashPasswordHelper(password);
+
+    // tạo activation token (link flow)
+    const activationToken = randomBytes(32).toString('hex');
+    const activationTokenExpiry = dayjs().add(24, 'hours').toDate(); // 24 giờ
+
+    const user = await this.userModel.create({
+      name,
+      email,
+      password: hashPassword,
+      isActive: false,
+      activationToken,
+      activationTokenExpiry,
+    });
+
+    // gửi email activation link (template 'activation' nên chứa activationUrl)
+    const activationUrl = `${process.env.FRONTEND_URL || process.env.BACKEND_URL || 'http://localhost:3000'}/auth/activate?token=${activationToken}`;
+    await this.mailerService.sendMail({
+      to: user.email,
+      subject: 'Activate your account',
+      template: 'activation',
+      context: {
+        name: user?.name ?? user.email,
+        activationUrl,
+      },
+    });
+
+    return { _id: user._id };
+  }
+}
