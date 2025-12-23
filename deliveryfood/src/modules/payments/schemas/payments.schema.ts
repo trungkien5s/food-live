@@ -2,7 +2,7 @@ import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import mongoose, { HydratedDocument } from 'mongoose';
 
 export type PaymentDocument = HydratedDocument<Payment>;
-export enum PaymentStatus { PENDING='pending', REQUIRES_ACTION='requires_action', SUCCEEDED='succeeded', FAILED='failed', CANCELED='canceled' }
+export enum PaymentStatus { PENDING = 'pending', REQUIRES_ACTION = 'requires_action', SUCCEEDED = 'succeeded', FAILED = 'failed', CANCELED = 'canceled' }
 
 @Schema({ timestamps: true })
 export class Payment {

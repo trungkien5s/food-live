@@ -88,12 +88,30 @@ function LoginFormPage({ form, onTabChange, onClose }) {
         throw new Error("Phản hồi từ server không hợp lệ");
       }
     } catch (err) {
-      console.error("Login error:", err);
-      const msg = err?.message || err?.response?.data?.message || "Đã có lỗi xảy ra. Vui lòng thử lại.";
-      dispatch(setError(msg));
-    } finally {
-      dispatch(setLoading(false));
-    }
+  console.error("Login error:", err);
+
+  const status = err?.response?.status;
+  const serverMsg =
+    err?.response?.data?.message ||
+    err?.response?.data?.error;
+
+  // Nếu BE trả 401 => show message bạn muốn
+  let msg = "Đã có lỗi xảy ra. Vui lòng thử lại.";
+
+  if (status === 401) {
+    msg = "Email hoặc mật khẩu không chính xác";
+  } else if (serverMsg) {
+    // BE có message rõ ràng thì ưu tiên dùng
+    msg = Array.isArray(serverMsg) ? serverMsg.join(", ") : serverMsg;
+  } else if (err?.message) {
+    msg = err.message;
+  }
+
+  dispatch(setError(msg));
+} finally {
+  dispatch(setLoading(false));
+}
+
   };
 
   const handleSocialLogin = async (provider) => {

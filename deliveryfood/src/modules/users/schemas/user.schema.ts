@@ -5,32 +5,32 @@ export type UserDocument = HydratedDocument<User>;
 
 @Schema({ timestamps: true })
 export class User {
-@Prop({ required: true })
-name: string;
+  @Prop({ required: true })
+  name: string;
 
-@Prop({ required: true, unique: true })
-email: string;
+  @Prop({ required: true, unique: true })
+  email: string;
 
-@Prop({ required: true })
-password: string;
+  @Prop({ required: true })
+  password: string;
 
-@Prop()
-phone: string;
+  @Prop()
+  phone: string;
 
-    @Prop()
-    address: string;
+  @Prop()
+  address: string;
 
-    @Prop({ default: 'USERS' })
-    role: string;
+  @Prop({ default: 'USERS' })
+  role: string;
 
-    @Prop({ default: 'LOCAL' })
-    accountType: string;
+  @Prop({ default: 'LOCAL' })
+  accountType: string;
 
-    @Prop({ default: false })
-    isActive: boolean;
+  @Prop({ default: false })
+  isActive: boolean;
 
-    @Prop()
-    codeId: string;
+  @Prop()
+  codeId: string;
 
 
   @Prop()
@@ -39,22 +39,34 @@ phone: string;
   @Prop()
   activationTokenExpiry?: Date;
 
-    @Prop()
-    codeExpired: Date;
+  @Prop()
+  codeExpired: Date;
 
-    @Prop()
-refreshToken: string;
+  @Prop()
+  refreshToken: string;
 
-@Prop()
+  @Prop()
   refreshTokenExpiry?: Date;
 
+  @Prop()
+  activationCode?: string;
 
-  _id: string
-    @Prop()
-    resetCode: string;
+  @Prop()
+  activationCodeExpiry?: Date;
 
-    @Prop()
-    resetCodeExpire: Date;
+  @Prop()
+  activatedAt?: Date;
+
+  @Prop()
+  image?: string;
+
+  _id: string;
+
+  @Prop()
+  resetCode: string;
+
+  @Prop()
+  resetCodeExpire: Date;
 }
 
 

@@ -1,9 +1,17 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model, PipelineStage, Types } from 'mongoose';
+import { Model, PipelineStage, Types, FilterQuery } from 'mongoose';
 import { Restaurant } from '@/modules/restaurants/schemas/restaurant.schema';
 import { MenuItem } from '@/modules/menu.items/schemas/menu.item.schema';
 import { SearchQueryDto } from './dto/search.dto';
+import {
+  SearchExecutionParams,
+  SearchFilters,
+  SearchTotals,
+  SearchMethodResult,
+  MongoMatchStage,
+  MongoSortStage
+} from './interfaces/search-types.interface';
 
 // Advanced Vietnamese text processing
 const normalizeVN = (str = '') => {
@@ -23,7 +31,7 @@ const createSearchTokens = (text: string) => {
   const normalized = normalizeVN(text);
   const words = normalized.split(/\s+/).filter(w => w.length > 0);
   const tokens = new Set<string>();
-  
+
   // Add full words
   words.forEach(word => {
     tokens.add(word);
@@ -32,22 +40,22 @@ const createSearchTokens = (text: string) => {
       tokens.add(word.substring(0, i));
     }
   });
-  
+
   // Add bigrams for better phrase matching
   for (let i = 0; i < words.length - 1; i++) {
     tokens.add(`${words[i]} ${words[i + 1]}`);
   }
-  
+
   return Array.from(tokens);
 };
 
 // Levenshtein distance for fuzzy matching
 const levenshteinDistance = (a: string, b: string): number => {
   const matrix = Array(a.length + 1).fill(null).map(() => Array(b.length + 1).fill(null));
-  
+
   for (let i = 0; i <= a.length; i++) matrix[i][0] = i;
   for (let j = 0; j <= b.length; j++) matrix[0][j] = j;
-  
+
   for (let i = 1; i <= a.length; i++) {
     for (let j = 1; j <= b.length; j++) {
       const cost = a[i - 1] === b[j - 1] ? 0 : 1;
@@ -58,7 +66,7 @@ const levenshteinDistance = (a: string, b: string): number => {
       );
     }
   }
-  
+
   return matrix[a.length][b.length];
 };
 
@@ -67,7 +75,7 @@ export class SearchService {
   constructor(
     @InjectModel(Restaurant.name) private restaurantModel: Model<Restaurant>,
     @InjectModel(MenuItem.name) private menuItemModel: Model<MenuItem>,
-  ) {}
+  ) { }
 
   async search(params: SearchQueryDto) {
     const {
@@ -123,7 +131,7 @@ export class SearchService {
     };
   }
 
-  private async executeAdvancedSearch(params: any) {
+  private async executeAdvancedSearch(params: SearchExecutionParams) {
     const {
       keyword, searchTokens, originalQuery, type,
       categoryId, city, isOpen, minPrice, maxPrice,
@@ -153,7 +161,7 @@ export class SearchService {
     // Strategy 2: If no exact results, try fuzzy search
     if (totalRestaurants === 0 && totalMenuItems === 0 && keyword.length >= 3) {
       strategy = 'fuzzy';
-      
+
       if (type !== 'menu-items') {
         const fuzzyResults = await this.searchRestaurantsFuzzy(keyword, {
           city, isOpen, sort, skip, limit, lat, lng
@@ -174,7 +182,7 @@ export class SearchService {
     // Strategy 3: Partial word matching (fallback)
     if (totalRestaurants === 0 && totalMenuItems === 0) {
       strategy = 'partial';
-      
+
       if (type !== 'menu-items') {
         const partialResults = await this.searchRestaurantsPartial(keyword, {
           city, isOpen, sort, skip, limit, lat, lng
@@ -200,122 +208,162 @@ export class SearchService {
   }
 
   // Exact/Prefix search for restaurants
-private async searchRestaurantsExact(keyword: string, tokens: string[], filters: any) {
-  // 1) Kiểm tra text index
-  let hasTextIndex = false;
-  try {
-    const indexes = await this.restaurantModel.collection.listIndexes().toArray();
-    hasTextIndex = indexes.some(idx => idx.weights && (idx as any).name === 'restaurant_text_index');
-  } catch {}
+  private async searchRestaurantsExact(keyword: string, tokens: string[], filters: SearchFilters): Promise<SearchMethodResult<Restaurant>> {
+    // 1) Kiểm tra text index
+    let hasTextIndex = false;
+    try {
+      const indexes = await this.restaurantModel.collection.listIndexes().toArray();
+      hasTextIndex = indexes.some(idx => idx.weights && (idx as { name?: string }).name === 'restaurant_text_index');
+    } catch { }
 
-  // 2) Build các nhánh non-text (KHÔNG chứa $text)
-  const orClauses: any[] = [
-    { name: new RegExp(`^${this.escapeRegex(keyword)}`, 'i') },
-    { searchKey: new RegExp(`^${this.escapeRegex(keyword)}`, 'i') },
-    ...(tokens.length > 0 ? [{ searchTokens: { $in: tokens.slice(0, 10) } }] : []),
-    { name: new RegExp(this.escapeRegex(keyword), 'i') },
-    { description: new RegExp(this.escapeRegex(keyword), 'i') },
-  ];
+    // 2) Build các nhánh non-text (KHÔNG chứa $text)
+    const orClauses: Array<FilterQuery<Restaurant>> = [
+      { name: new RegExp(`^${this.escapeRegex(keyword)}`, 'i') },
+      { searchKey: new RegExp(`^${this.escapeRegex(keyword)}`, 'i') },
+      ...(tokens.length > 0 ? [{ searchTokens: { $in: tokens.slice(0, 10) } }] : []),
+      { name: new RegExp(this.escapeRegex(keyword), 'i') },
+      { description: new RegExp(this.escapeRegex(keyword), 'i') },
+    ];
 
-  // Áp lọc cấp cao (city/isOpen) vào matchStage sau
-  const nonTextMatch: any = { $or: orClauses };
-  this.applyRestaurantFilters(nonTextMatch, filters);
+    // Áp lọc cấp cao (city/isOpen) vào matchStage sau
+    const nonTextMatch: MongoMatchStage = { $or: orClauses };
+    this.applyRestaurantFilters(nonTextMatch, filters);
 
-  // 3) Nếu có text index → chạy TEXT-ONLY trước (KHÔNG $or)
-  if (hasTextIndex && keyword.length >= 2) {
-    const textMatch: any = { $text: { $search: `"${keyword}"` } };
-    this.applyRestaurantFilters(textMatch, filters);
+    // 3) Nếu có text index → chạy TEXT-ONLY trước (KHÔNG $or)
+    if (hasTextIndex && keyword.length >= 2) {
+      const textMatch: MongoMatchStage = { $text: { $search: `"${keyword}"` } };
+      this.applyRestaurantFilters(textMatch, filters);
 
-    const textPipeline: PipelineStage[] = [
-      { $match: textMatch },
+      const textPipeline: PipelineStage[] = [
+        { $match: textMatch },
+        {
+          $addFields: {
+            relevanceScore: {
+              $add: [
+                { $ifNull: [{ $meta: 'textScore' }, 0] },
+                { $multiply: ['$rating', 5] },
+              ],
+            },
+          },
+        },
+      ];
+      this.applySorting(textPipeline, filters.sort, 'restaurant');
+      this.applyGeoNear(textPipeline, filters.lat, filters.lng, 'restaurant');
+
+      const [data, total] = await Promise.all([
+        this.restaurantModel.aggregate([
+          ...textPipeline,
+          { $skip: filters.skip },
+          { $limit: filters.limit },
+          { $project: { relevanceScore: 0, searchTokens: 0 } },
+        ]).exec(),
+        this.restaurantModel.countDocuments(textMatch).exec(),
+      ]);
+
+      // Nếu có kết quả từ text search thì trả luôn (đã tránh lỗi)
+      if (total > 0) return { data, total };
+      // Nếu không có → rơi xuống non-text
+    }
+
+    // 4) Non-text pipeline (regex/tokens)
+    const pipeline: PipelineStage[] = [
+      { $match: nonTextMatch },
       {
         $addFields: {
           relevanceScore: {
             $add: [
-              { $ifNull: [{ $meta: 'textScore' }, 0] },
+              { $cond: { if: { $eq: [{ $toLower: '$name' }, keyword] }, then: 100, else: 0 } },
+              { $cond: { if: { $regexMatch: { input: { $toLower: '$name' }, regex: `^${this.escapeRegex(keyword)}` } }, then: 50, else: 0 } },
+              { $cond: { if: { $regexMatch: { input: { $toLower: '$name' }, regex: this.escapeRegex(keyword) } }, then: 25, else: 0 } },
               { $multiply: ['$rating', 5] },
             ],
           },
         },
       },
     ];
-    this.applySorting(textPipeline, filters.sort, 'restaurant');
-    this.applyGeoNear(textPipeline, filters.lat, filters.lng, 'restaurant');
+    this.applySorting(pipeline, filters.sort, 'restaurant');
+    this.applyGeoNear(pipeline, filters.lat, filters.lng, 'restaurant');
 
     const [data, total] = await Promise.all([
       this.restaurantModel.aggregate([
-        ...textPipeline,
+        ...pipeline,
         { $skip: filters.skip },
         { $limit: filters.limit },
         { $project: { relevanceScore: 0, searchTokens: 0 } },
       ]).exec(),
-      this.restaurantModel.countDocuments(textMatch).exec(),
+      this.restaurantModel.countDocuments(nonTextMatch).exec(),
     ]);
 
-    // Nếu có kết quả từ text search thì trả luôn (đã tránh lỗi)
-    if (total > 0) return { data, total };
-    // Nếu không có → rơi xuống non-text
+    return { data, total };
   }
-
-  // 4) Non-text pipeline (regex/tokens)
-  const pipeline: PipelineStage[] = [
-    { $match: nonTextMatch },
-    {
-      $addFields: {
-        relevanceScore: {
-          $add: [
-            { $cond: { if: { $eq: [{ $toLower: '$name' }, keyword] }, then: 100, else: 0 } },
-            { $cond: { if: { $regexMatch: { input: { $toLower: '$name' }, regex: `^${this.escapeRegex(keyword)}` } }, then: 50, else: 0 } },
-            { $cond: { if: { $regexMatch: { input: { $toLower: '$name' }, regex: this.escapeRegex(keyword) } }, then: 25, else: 0 } },
-            { $multiply: ['$rating', 5] },
-          ],
-        },
-      },
-    },
-  ];
-  this.applySorting(pipeline, filters.sort, 'restaurant');
-  this.applyGeoNear(pipeline, filters.lat, filters.lng, 'restaurant');
-
-  const [data, total] = await Promise.all([
-    this.restaurantModel.aggregate([
-      ...pipeline,
-      { $skip: filters.skip },
-      { $limit: filters.limit },
-      { $project: { relevanceScore: 0, searchTokens: 0 } },
-    ]).exec(),
-    this.restaurantModel.countDocuments(nonTextMatch).exec(),
-  ]);
-
-  return { data, total };
-}
 
 
   // Exact/Prefix search for menu items
-private async searchMenuItemsExact(keyword: string, tokens: string[], filters: any) {
-  let hasTextIndex = false;
-  try {
-    const indexes = await this.menuItemModel.collection.listIndexes().toArray();
-    hasTextIndex = indexes.some(idx => idx.weights && (idx as any).name === 'menuitem_text_index');
-  } catch {}
+  private async searchMenuItemsExact(keyword: string, tokens: string[], filters: SearchFilters): Promise<SearchMethodResult<MenuItem>> {
+    let hasTextIndex = false;
+    try {
+      const indexes = await this.menuItemModel.collection.listIndexes().toArray();
+      hasTextIndex = indexes.some(idx => idx.weights && (idx as { name?: string }).name === 'menuitem_text_index');
+    } catch { }
 
-  const orClauses: any[] = [
-    { title: new RegExp(`^${this.escapeRegex(keyword)}`, 'i') },
-    { searchKey: new RegExp(`^${this.escapeRegex(keyword)}`, 'i') },
-    ...(tokens.length > 0 ? [{ searchTokens: { $in: tokens.slice(0, 10) } }] : []),
-    { title: new RegExp(this.escapeRegex(keyword), 'i') },
-    { description: new RegExp(this.escapeRegex(keyword), 'i') },
-  ];
+    const orClauses: Array<FilterQuery<MenuItem>> = [
+      { title: new RegExp(`^${this.escapeRegex(keyword)}`, 'i') },
+      { searchKey: new RegExp(`^${this.escapeRegex(keyword)}`, 'i') },
+      ...(tokens.length > 0 ? [{ searchTokens: { $in: tokens.slice(0, 10) } }] : []),
+      { title: new RegExp(this.escapeRegex(keyword), 'i') },
+      { description: new RegExp(this.escapeRegex(keyword), 'i') },
+    ];
 
-  const nonTextMatch: any = { $or: orClauses };
-  this.applyMenuItemFilters(nonTextMatch, filters);
+    const nonTextMatch: MongoMatchStage = { $or: orClauses };
+    this.applyMenuItemFilters(nonTextMatch, filters);
 
-  // TEXT-ONLY trước
-  if (hasTextIndex && keyword.length >= 2) {
-    const textMatch: any = { $text: { $search: `"${keyword}"` } };
-    this.applyMenuItemFilters(textMatch, filters);
+    // TEXT-ONLY trước
+    if (hasTextIndex && keyword.length >= 2) {
+      const textMatch: MongoMatchStage = { $text: { $search: `"${keyword}"` } };
+      this.applyMenuItemFilters(textMatch, filters);
 
-    const textPipeline: PipelineStage[] = [
-      { $match: textMatch },
+      const textPipeline: PipelineStage[] = [
+        { $match: textMatch },
+        {
+          $lookup: {
+            from: 'restaurants',
+            localField: 'restaurant',
+            foreignField: '_id',
+            as: 'restaurant',
+          },
+        },
+        { $unwind: '$restaurant' },
+        ...(filters.city ? [{ $match: { 'restaurant.city': filters.city } }] : []),
+        ...(filters.isOpen !== undefined ? [{ $match: { 'restaurant.isOpen': filters.isOpen === 'true' } }] : []),
+        {
+          $addFields: {
+            relevanceScore: {
+              $add: [
+                { $ifNull: [{ $meta: 'textScore' }, 0] },
+                { $multiply: ['$restaurant.rating', 3] },
+              ],
+            },
+          },
+        },
+      ];
+      this.applySorting(textPipeline, filters.sort, 'menuItem');
+
+      const [data, total] = await Promise.all([
+        this.menuItemModel.aggregate([
+          ...textPipeline,
+          { $skip: filters.skip },
+          { $limit: filters.limit },
+          { $project: { relevanceScore: 0, searchTokens: 0 } },
+        ]).exec(),
+        this.menuItemModel.countDocuments(textMatch).exec(),
+      ]);
+
+      if (total > 0) return { data, total };
+    }
+
+    // NON-TEXT (regex/tokens)
+    const pipeline: PipelineStage[] = [
+      { $match: nonTextMatch },
       {
         $lookup: {
           from: 'restaurants',
@@ -331,73 +379,33 @@ private async searchMenuItemsExact(keyword: string, tokens: string[], filters: a
         $addFields: {
           relevanceScore: {
             $add: [
-              { $ifNull: [{ $meta: 'textScore' }, 0] },
+              { $cond: { if: { $eq: [{ $toLower: '$title' }, keyword] }, then: 100, else: 0 } },
+              { $cond: { if: { $regexMatch: { input: { $toLower: '$title' }, regex: `^${this.escapeRegex(keyword)}` } }, then: 50, else: 0 } },
+              { $cond: { if: { $regexMatch: { input: { $toLower: '$title' }, regex: this.escapeRegex(keyword) } }, then: 25, else: 0 } },
               { $multiply: ['$restaurant.rating', 3] },
             ],
           },
         },
       },
     ];
-    this.applySorting(textPipeline, filters.sort, 'menuItem');
+    this.applySorting(pipeline, filters.sort, 'menuItem');
 
     const [data, total] = await Promise.all([
       this.menuItemModel.aggregate([
-        ...textPipeline,
+        ...pipeline,
         { $skip: filters.skip },
         { $limit: filters.limit },
         { $project: { relevanceScore: 0, searchTokens: 0 } },
       ]).exec(),
-      this.menuItemModel.countDocuments(textMatch).exec(),
+      this.menuItemModel.countDocuments(nonTextMatch).exec(),
     ]);
 
-    if (total > 0) return { data, total };
+    return { data, total };
   }
-
-  // NON-TEXT (regex/tokens)
-  const pipeline: PipelineStage[] = [
-    { $match: nonTextMatch },
-    {
-      $lookup: {
-        from: 'restaurants',
-        localField: 'restaurant',
-        foreignField: '_id',
-        as: 'restaurant',
-      },
-    },
-    { $unwind: '$restaurant' },
-    ...(filters.city ? [{ $match: { 'restaurant.city': filters.city } }] : []),
-    ...(filters.isOpen !== undefined ? [{ $match: { 'restaurant.isOpen': filters.isOpen === 'true' } }] : []),
-    {
-      $addFields: {
-        relevanceScore: {
-          $add: [
-            { $cond: { if: { $eq: [{ $toLower: '$title' }, keyword] }, then: 100, else: 0 } },
-            { $cond: { if: { $regexMatch: { input: { $toLower: '$title' }, regex: `^${this.escapeRegex(keyword)}` } }, then: 50, else: 0 } },
-            { $cond: { if: { $regexMatch: { input: { $toLower: '$title' }, regex: this.escapeRegex(keyword) } }, then: 25, else: 0 } },
-            { $multiply: ['$restaurant.rating', 3] },
-          ],
-        },
-      },
-    },
-  ];
-  this.applySorting(pipeline, filters.sort, 'menuItem');
-
-  const [data, total] = await Promise.all([
-    this.menuItemModel.aggregate([
-      ...pipeline,
-      { $skip: filters.skip },
-      { $limit: filters.limit },
-      { $project: { relevanceScore: 0, searchTokens: 0 } },
-    ]).exec(),
-    this.menuItemModel.countDocuments(nonTextMatch).exec(),
-  ]);
-
-  return { data, total };
-}
 
 
   // Fuzzy search implementations
-  private async searchRestaurantsFuzzy(keyword: string, filters: any) {
+  private async searchRestaurantsFuzzy(keyword: string, filters: SearchFilters): Promise<SearchMethodResult<Restaurant>> {
     // Implementation for fuzzy restaurant search
     const pipeline: PipelineStage[] = [
       {
@@ -461,7 +469,7 @@ private async searchMenuItemsExact(keyword: string, tokens: string[], filters: a
     return { data, total };
   }
 
-  private async searchMenuItemsFuzzy(keyword: string, filters: any) {
+  private async searchMenuItemsFuzzy(keyword: string, filters: SearchFilters): Promise<SearchMethodResult<MenuItem>> {
     // Similar implementation for menu items
     const pipeline: PipelineStage[] = [
       {
@@ -496,11 +504,11 @@ private async searchMenuItemsExact(keyword: string, tokens: string[], filters: a
   }
 
   // Partial matching (last resort)
-  private async searchRestaurantsPartial(keyword: string, filters: any) {
+  private async searchRestaurantsPartial(keyword: string, filters: SearchFilters): Promise<SearchMethodResult<Restaurant>> {
     const words = keyword.split(' ').filter(w => w.length >= 2);
     const regexPattern = words.map(w => `(?=.*${this.escapeRegex(w)})`).join('');
-    
-    const matchStage: any = {
+
+    const matchStage: FilterQuery<Restaurant> = {
       $or: [
         { name: new RegExp(regexPattern, 'i') },
         { searchKey: new RegExp(regexPattern, 'i') }
@@ -518,18 +526,20 @@ private async searchMenuItemsExact(keyword: string, tokens: string[], filters: a
     return { data, total };
   }
 
-  private async searchMenuItemsPartial(keyword: string, filters: any) {
+  private async searchMenuItemsPartial(keyword: string, filters: SearchFilters): Promise<SearchMethodResult<MenuItem>> {
     const words = keyword.split(' ').filter(w => w.length >= 2);
     const regexPattern = words.map(w => `(?=.*${this.escapeRegex(w)})`).join('');
-    
+
     const [data, total] = await Promise.all([
       this.menuItemModel.aggregate([
-        { $match: { 
-          $or: [
-            { title: new RegExp(regexPattern, 'i') },
-            { searchKey: new RegExp(regexPattern, 'i') }
-          ]
-        }},
+        {
+          $match: {
+            $or: [
+              { title: new RegExp(regexPattern, 'i') },
+              { searchKey: new RegExp(regexPattern, 'i') }
+            ]
+          }
+        },
         {
           $lookup: {
             from: 'restaurants',
@@ -559,14 +569,14 @@ private async searchMenuItemsExact(keyword: string, tokens: string[], filters: a
     const skip = Math.max(0, (page - 1) * limit);
 
     const [restaurants, totalRestaurants, menuItems, totalMenuItems] = await Promise.all([
-      type !== 'menu-items' ? 
+      type !== 'menu-items' ?
         this.restaurantModel
           .find({ isOpen: true })
           .sort({ rating: -1, createdAt: -1 })
           .skip(skip)
           .limit(limit)
           .exec() : [],
-      type !== 'menu-items' ? 
+      type !== 'menu-items' ?
         this.restaurantModel.countDocuments({ isOpen: true }).exec() : 0,
       type !== 'restaurants' ?
         this.menuItemModel.aggregate([
@@ -611,9 +621,9 @@ private async searchMenuItemsExact(keyword: string, tokens: string[], filters: a
   }
 
   // Get search suggestions
-  private async getSuggestions(query: string, totals: any) {
+  private async getSuggestions(query: string, totals: SearchTotals) {
     if (!query || query.length < 2) return [];
-    
+
     const keyword = normalizeVN(query);
     const suggestions = [];
 
@@ -657,24 +667,40 @@ private async searchMenuItemsExact(keyword: string, tokens: string[], filters: a
     return keyword.split('').join('.*?');
   }
 
-  private applyRestaurantFilters(matchStage: any, filters: any) {
+  private applyRestaurantFilters(matchStage: MongoMatchStage, filters: SearchFilters): void {
     if (filters.city) matchStage.city = filters.city;
     if (filters.isOpen !== undefined) matchStage.isOpen = filters.isOpen === 'true';
   }
 
-  private applyMenuItemFilters(matchStage: any, filters: any) {
-    if (filters.categoryId) matchStage.categoryId = new Types.ObjectId(filters.categoryId);
-    if (filters.minPrice) {
-      matchStage.basePrice = { ...(matchStage.basePrice || {}), $gte: Number(filters.minPrice) };
-    }
-    if (filters.maxPrice) {
-      matchStage.basePrice = { ...(matchStage.basePrice || {}), $lte: Number(filters.maxPrice) };
-    }
+  private applyMenuItemFilters(matchStage: MongoMatchStage, filters: SearchFilters): void {
+  if (filters.categoryId) matchStage.categoryId = new Types.ObjectId(filters.categoryId);
+
+  // đảm bảo basePrice là object
+  const current =
+    matchStage.basePrice &&
+    typeof matchStage.basePrice === 'object' &&
+    !Array.isArray(matchStage.basePrice)
+      ? (matchStage.basePrice as Record<string, unknown>)
+      : {};
+
+  const next: Record<string, unknown> = { ...current };
+
+  if (filters.minPrice !== undefined && filters.minPrice !== null) {
+    next.$gte = Number(filters.minPrice);
+  }
+  if (filters.maxPrice !== undefined && filters.maxPrice !== null) {
+    next.$lte = Number(filters.maxPrice);
   }
 
-  private applySorting(pipeline: PipelineStage[], sort: string, entityType: 'restaurant' | 'menuItem') {
-    const sortStage: any = {};
-    
+  if (Object.keys(next).length > 0) {
+    matchStage.basePrice = next;
+  }
+}
+
+
+  private applySorting(pipeline: PipelineStage[], sort: string, entityType: 'restaurant' | 'menuItem'): void {
+    const sortStage: MongoSortStage = {};
+
     switch (sort) {
       case 'rating':
         sortStage[entityType === 'restaurant' ? 'rating' : 'restaurant.rating'] = -1;
@@ -691,26 +717,36 @@ private async searchMenuItemsExact(keyword: string, tokens: string[], filters: a
         sortStage[entityType === 'restaurant' ? 'rating' : 'restaurant.rating'] = -1;
         break;
     }
-    
+
     if (Object.keys(sortStage).length > 0) {
       pipeline.push({ $sort: sortStage });
     }
   }
 
-  private applyGeoNear(pipeline: PipelineStage[], lat?: string, lng?: string, entityType?: string) {
-    if (lat && lng && !isNaN(Number(lat)) && !isNaN(Number(lng))) {
-      if (entityType === 'restaurant') {
-        pipeline.unshift({
-          $geoNear: {
-            near: { type: 'Point', coordinates: [Number(lng), Number(lat)] },
-            distanceField: 'distance',
-            spherical: true,
-            key: 'location'
-          }
-        } as any);
-      }
-    }
+  private applyGeoNear(
+  pipeline: PipelineStage[],
+  lat?: string | number,
+  lng?: string | number,
+  entityType?: 'restaurant' | 'menuItem',
+) {
+  if (lat === undefined || lng === undefined) return;
+
+  const latNum = typeof lat === 'number' ? lat : Number(lat);
+  const lngNum = typeof lng === 'number' ? lng : Number(lng);
+
+  if (!Number.isFinite(latNum) || !Number.isFinite(lngNum)) return;
+
+  if (entityType === 'restaurant') {
+    pipeline.unshift({
+      $geoNear: {
+        near: { type: 'Point', coordinates: [lngNum, latNum] },
+        distanceField: 'distance',
+        spherical: true,
+        key: 'location',
+      },
+    } as PipelineStage);
   }
+}
 
   // Setup search indexes (run this once)
   async setupSearchIndexes() {
@@ -720,7 +756,7 @@ private async searchMenuItemsExact(keyword: string, tokens: string[], filters: a
         name: 'text',
         description: 'text',
         searchKey: 'text'
-      }, { 
+      }, {
         weights: { name: 10, searchKey: 5, description: 1 },
         name: 'restaurant_text_index'
       });
@@ -741,7 +777,7 @@ private async searchMenuItemsExact(keyword: string, tokens: string[], filters: a
       await this.menuItemModel.collection.createIndex({ title: 1 });
       await this.restaurantModel.collection.createIndex({ rating: -1 });
       await this.menuItemModel.collection.createIndex({ basePrice: 1 });
-      
+
       // Geo index if using location
       await this.restaurantModel.collection.createIndex({ location: '2dsphere' });
 
@@ -756,36 +792,36 @@ private async searchMenuItemsExact(keyword: string, tokens: string[], filters: a
   // Rebuild search data (run when adding new restaurants/menu items)
   async rebuildSearchData() {
     console.log('Rebuilding search data...');
-    
+
     // Update restaurants
     const restaurants = await this.restaurantModel.find().select('name description').exec();
     for (const restaurant of restaurants) {
       const searchKey = normalizeVN(`${restaurant.name} ${restaurant.description || ''}`);
       const searchTokens = createSearchTokens(`${restaurant.name} ${restaurant.description || ''}`);
-      
+
       await this.restaurantModel.updateOne(
         { _id: restaurant._id },
         { $set: { searchKey, searchTokens } }
       );
     }
-    
+
     // Update menu items
     const menuItems = await this.menuItemModel.find().select('title description').exec();
     for (const menuItem of menuItems) {
       const searchKey = normalizeVN(`${menuItem.title} ${menuItem.description || ''}`);
       const searchTokens = createSearchTokens(`${menuItem.title} ${menuItem.description || ''}`);
-      
+
       await this.menuItemModel.updateOne(
         { _id: menuItem._id },
         { $set: { searchKey, searchTokens } }
       );
     }
-    
+
     console.log(`Updated ${restaurants.length} restaurants and ${menuItems.length} menu items`);
-    return { 
-      success: true, 
-      restaurantsUpdated: restaurants.length, 
-      menuItemsUpdated: menuItems.length 
+    return {
+      success: true,
+      restaurantsUpdated: restaurants.length,
+      menuItemsUpdated: menuItems.length
     };
   }
 }

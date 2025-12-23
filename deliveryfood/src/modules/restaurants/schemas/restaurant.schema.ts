@@ -48,6 +48,16 @@ export class Restaurant {
   @Prop()
   openTime?: string;
 
+  // restaurant.schema.ts
+@Prop({ default: true, index: true })
+isActive: boolean;
+
+@Prop({ default: false, index: true })
+isDeleted: boolean;
+
+@Prop({ default: null })
+deletedAt?: Date;
+
   @Prop()
   closeTime?: string;
 

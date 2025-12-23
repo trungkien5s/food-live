@@ -30,6 +30,16 @@ export class MenuItem {
 
   @Prop()
   image?: string;
+  // menu.item.schema.ts
+@Prop({ default: true, index: true })
+isActive: boolean;
+
+@Prop({ default: false, index: true })
+isDeleted: boolean;
+
+@Prop({ default: null })
+deletedAt?: Date;
+
 
   // <<< BỔ SUNG >>>
 }

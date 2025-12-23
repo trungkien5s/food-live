@@ -5,7 +5,7 @@ import mongoose from "mongoose";
 export class SearchLog {
   @Prop({ required: true, trim: true }) keyword: string;
   @Prop({ type: mongoose.Schema.Types.ObjectId, ref: 'User' }) user?: mongoose.Types.ObjectId;
-  @Prop({ type: Object }) filters?: any; // Lưu bộ lọc nếu có
+  @Prop({ type: Object }) filters?: Record<string, unknown>; // Lưu bộ lọc nếu có
   @Prop({ default: 1 }) count: number;   // Số lần tìm kiếm keyword này
 }
 

@@ -6,11 +6,13 @@ import { MenusService } from './menus.service';
 import { MenusController } from './menus.controller';
 import { RestaurantsModule } from '@/modules/restaurants/restaurants.module';
 import { CloudinaryModule } from '@/cloudinary/cloudinary.module';
+import { Restaurant, RestaurantSchema } from '../restaurants/schemas/restaurant.schema';
 
 @Module({
   imports: [
     MongooseModule.forFeature([
       { name: Menu.name, schema: MenuSchema },
+      { name: Restaurant.name, schema: RestaurantSchema },
     ]),
     RestaurantsModule,
     CloudinaryModule,

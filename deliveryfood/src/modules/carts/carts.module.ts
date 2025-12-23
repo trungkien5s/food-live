@@ -19,6 +19,6 @@ import { CartItem, CartItemSchema } from '../cart.items/schemas/cart.items.schem
   ],
   controllers: [CartsController],
   providers: [CartsService],
-  exports: [CartsService],
+  exports: [MongooseModule, CartsService], 
 })
 export class CartsModule {}

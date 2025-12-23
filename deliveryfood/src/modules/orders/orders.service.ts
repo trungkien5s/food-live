@@ -1,8 +1,8 @@
 // src/modules/orders/orders.service.ts
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types, isValidObjectId, PipelineStage } from 'mongoose';
-import { Order, OrderDocument, OrderStatus, PaymentStatus, PaymentMethod } from './schemas/order.schema';
+import { Model, Types, isValidObjectId, PipelineStage, FilterQuery } from 'mongoose';
+import { Order, OrderDocument, OrderStatus, PaymentStatus, PaymentMethod, DeliveryAddress, OrderFees } from './schemas/order.schema';
 import { CreateOrderDto, UpdateDeliveryAddressDto, RateOrderDto, CancelOrderDto } from './dto/create-order.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
 import { Restaurant, RestaurantDocument } from '../restaurants/schemas/restaurant.schema';
@@ -40,6 +40,74 @@ interface GroupedCartItem {
   selectedOptions: PopulatedMenuItemOptionDocument[];
 }
 
+/**
+ * Extended Order interface with dynamic fields used by service
+ */
+interface ExtendedOrderDocument extends OrderDocument {
+  preparationMinutes?: number;
+  shipperLocation?: [number, number];
+  lastComputedDistanceToDestination?: number;
+  refunds?: Array<{ amount: number; reason: string; refundedAt?: Date; requestedAt?: Date }>;
+  distanceFromShipper?: number;
+}
+
+/**
+ * Query filter type for order queries
+ */
+interface OrderQueryFilter extends FilterQuery<OrderDocument> {
+  restaurant?: Types.ObjectId;
+  user?: Types.ObjectId;
+
+  // ✅ FIX: allow $exists
+  shipper?: Types.ObjectId | { $exists: boolean };
+
+  status?: OrderStatus | { $in: OrderStatus[] };
+  paymentMethod?: PaymentMethod;
+  paymentStatus?: PaymentStatus;
+  'timing.orderTime'?: { $gte?: Date; $lte?: Date };
+}
+
+/**
+ * Create order from cart DTO (parameters not strictly typed in original code)
+ */
+interface CreateFromCartDto {
+  deliveryAddress: DeliveryAddress;
+  distanceKm?: number;
+  estimatedDeliveryMinutes?: number;
+  paymentMethod?: PaymentMethod;
+  serviceFee?: number;
+  discount?: number;
+  tax?: number;
+  orderNote?: string;
+  deliveryNote?: string;
+  couponCode?: string;
+  orderTime?: Date;
+  estimatedPreparationMinutes?: number;
+  deliveryFee?: number;
+}
+
+/**
+ * Query parameters for various endpoints
+ */
+interface PaginationQuery {
+  page?: number;
+  limit?: number;
+  status?: OrderStatus;
+}
+
+interface ShipperLocationQuery extends PaginationQuery {
+  maxDistance?: number;
+  lat?: number;
+  lng?: number;
+}
+
+interface AnalyticsQuery {
+  startDate?: string;
+  endDate?: string;
+  restaurantId?: string;
+  period?: 'day' | 'week' | 'month';
+}
+
 @Injectable()
 export class OrdersService {
   constructor(
@@ -51,7 +119,7 @@ export class OrdersService {
     @InjectModel(OrderDetail.name) private orderDetailModel: Model<OrderDetail>,
     @InjectModel(Shipper.name) private shipperModel: Model<ShipperDocument>,
     private readonly shipperService: ShipperService,
-  ) {}
+  ) { }
 
   // ---------- helpers ----------
   private calculateDeliveryFee(distanceKm: number): number {
@@ -67,7 +135,7 @@ export class OrdersService {
     return new Date(Date.now() + total * 60 * 1000);
   }
 
-  private validateDeliveryAddress(address: any): void {
+  private validateDeliveryAddress(address: DeliveryAddress): void {
     if (!address || !Array.isArray(address.coordinates) || address.coordinates.length !== 2) {
       throw new BadRequestException('Tọa độ địa chỉ không hợp lệ');
     }
@@ -166,7 +234,7 @@ export class OrdersService {
     const order = await this.orderModel.create({
       user: new Types.ObjectId(userId),
       restaurant: new Types.ObjectId(restaurantId),
-      status: (OrderStatus as any).PENDING || 'PENDING',
+      status: OrderStatus.PENDING,
       deliveryAddress,
       distanceKm: distanceKm || 0,
       estimatedDeliveryMinutes: estimatedDeliveryMinutes || 30,
@@ -190,7 +258,7 @@ export class OrdersService {
       couponCode: dto.couponCode,
       // store preparation minutes as an extra field to compute later if schema doesn't include it
       preparationMinutes: 20,
-    } as any);
+    });
 
     // create order details
     for (const { menuItem, quantity, selectedOptions } of itemMap.values()) {
@@ -202,7 +270,7 @@ export class OrdersService {
         quantity,
         selectedOptions: (selectedOptions || []).map(o => o._id),
         price,
-      } as any);
+      });
     }
 
     // delete cart items
@@ -218,7 +286,7 @@ export class OrdersService {
   }
 
   // ---------- createFromCart (create from all cart items for restaurant) ----------
-  async createFromCart(userId: string, restaurantId: string, dto: any): Promise<OrderDocument> {
+  async createFromCart(userId: string, restaurantId: string, dto: CreateFromCartDto): Promise<OrderDocument> {
     const cart = await this.cartModel.findOne({ user: userId });
     if (!cart) throw new NotFoundException('Không tìm thấy giỏ hàng');
 
@@ -259,8 +327,7 @@ export class OrdersService {
       deliveryNote: dto.deliveryNote,
       couponCode: dto.couponCode,
       orderTime: dto.orderTime,
-      estimatedPreparationMinutes: dto.estimatedPreparationMinutes,
-    } as any;
+    };
 
     return this.createFromCartItems(userId, createDto);
   }
@@ -272,27 +339,28 @@ export class OrdersService {
     if (!order) throw new NotFoundException('Không tìm thấy đơn hàng');
 
     // allow only when PENDING or CONFIRMED
-    const allowStates = [(OrderStatus as any).PENDING || 'PENDING', (OrderStatus as any).CONFIRMED || 'CONFIRMED'];
-    if (!allowStates.includes(order.status as any)) {
+    const allowStates = [OrderStatus.PENDING, OrderStatus.CONFIRMED];
+    if (!allowStates.includes(order.status)) {
       throw new BadRequestException(`Không thể cập nhật địa chỉ giao hàng khi đơn hàng ở trạng thái ${order.status}`);
     }
 
     if (dto.deliveryAddress) {
       this.validateDeliveryAddress(dto.deliveryAddress);
-      order.deliveryAddress = dto.deliveryAddress as any;
+      order.deliveryAddress = dto.deliveryAddress;
     }
 
     if (dto.distanceKm) {
-      order.distanceKm = dto.distanceKm as any;
+      order.distanceKm = dto.distanceKm;
       order.estimatedDeliveryMinutes = dto.estimatedDeliveryMinutes || Math.max(20, dto.distanceKm * 4);
       const newDeliveryFee = dto.deliveryFee || this.calculateDeliveryFee(dto.distanceKm);
-      if (!order.fees) order.fees = {} as any;
+      if (!order.fees) order.fees = { subtotal: 0, deliveryFee: 0, serviceFee: 0, discount: 0, tax: 0, totalAmount: 0 };
       order.fees.deliveryFee = newDeliveryFee;
       order.fees.totalAmount = (order.fees.subtotal || 0) + newDeliveryFee + (order.fees.serviceFee || 0) - (order.fees.discount || 0) + (order.fees.tax || 0);
       // update estimate
-      const prepMins = (order as any).preparationMinutes || 20;
-      (order as any).timing = order.timing || {};
-      (order as any).timing.estimatedDeliveryTime = this.calculateEstimatedDeliveryTime(dto.distanceKm, prepMins);
+      const extOrder = order as ExtendedOrderDocument;
+      const prepMins = extOrder.preparationMinutes || 20;
+      if (!order.timing) order.timing = { orderTime: new Date() };
+      order.timing.estimatedDeliveryTime = this.calculateEstimatedDeliveryTime(dto.distanceKm, prepMins);
     }
 
     await order.save();
@@ -300,9 +368,9 @@ export class OrdersService {
   }
 
   // ---------- restaurant list helper ----------
-  async findRestaurantOrders(restaurantId: string, query: any) {
+  async findRestaurantOrders(restaurantId: string, query: PaginationQuery) {
     const { page = 1, limit = 10, status } = query || {};
-    const filter: any = { restaurant: new Types.ObjectId(restaurantId) };
+    const filter: OrderQueryFilter = { restaurant: new Types.ObjectId(restaurantId) };
     if (status) filter.status = status;
     const skip = (Number(page) - 1) * Number(limit);
     const [data, total] = await Promise.all([
@@ -313,9 +381,9 @@ export class OrdersService {
   }
 
   // ---------- findAll (admin) ----------
-  async findAll(query: any) {
+  async findAll(query: PaginationQuery & { paymentMethod?: PaymentMethod; paymentStatus?: PaymentStatus }) {
     const { page = 1, limit = 10, status, paymentMethod, paymentStatus } = query || {};
-    const filter: any = {};
+    const filter: OrderQueryFilter = {};
     if (status) filter.status = status;
     if (paymentMethod) filter.paymentMethod = paymentMethod;
     if (paymentStatus) filter.paymentStatus = paymentStatus;
@@ -328,51 +396,51 @@ export class OrdersService {
   }
 
   // ---------- user orders ----------
-// imports: ensure orderDetailModel được InjectModel (bạn đã có)
-async findByUser(userId: string, query: any) {
-  const { page = 1, limit = 10, status } = query || {};
-  const filter: any = { user: new Types.ObjectId(userId) };
-  if (status) filter.status = status;
-  const skip = (Number(page) - 1) * Number(limit);
+  // imports: ensure orderDetailModel được InjectModel (bạn đã có)
+  async findByUser(userId: string, query: PaginationQuery) {
+    const { page = 1, limit = 10, status } = query || {};
+    const filter: OrderQueryFilter = { user: new Types.ObjectId(userId) };
+    if (status) filter.status = status;
+    const skip = (Number(page) - 1) * Number(limit);
 
-  const [orders, total] = await Promise.all([
-    this.orderModel
-      .find(filter)
-      .sort({ 'timing.orderTime': -1 })
-      .skip(skip)
-      .limit(Number(limit))
-      .populate('restaurant', 'name address image'), // keep other populates if needed
-    this.orderModel.countDocuments(filter),
-  ]);
+    const [orders, total] = await Promise.all([
+      this.orderModel
+        .find(filter)
+        .sort({ 'timing.orderTime': -1 })
+        .skip(skip)
+        .limit(Number(limit))
+        .populate('restaurant', 'name address image'), // keep other populates if needed
+      this.orderModel.countDocuments(filter),
+    ]);
 
-  // Lấy order details tương ứng (nếu bạn muốn trả về cùng payload)
-  const orderIds = orders.map(o => o._id);
-  const details = await this.orderDetailModel.find({ order: { $in: orderIds } }).populate('menuItem', 'name image title');
+    // Lấy order details tương ứng (nếu bạn muốn trả về cùng payload)
+    const orderIds = orders.map(o => o._id);
+    const details = await this.orderDetailModel.find({ order: { $in: orderIds } }).populate('menuItem', 'name image title');
 
-  // Nhóm details theo order id
-  const detailsByOrder = details.reduce((acc, d: any) => {
-    const k = d.order.toString();
-    if (!acc[k]) acc[k] = [];
-    acc[k].push(d);
-    return acc;
-  }, {} as Record<string, any[]>);
+    // Nhóm details theo order id
+    const detailsByOrder = details.reduce((acc, d) => {
+      const k = d.order.toString();
+      if (!acc[k]) acc[k] = [];
+      acc[k].push(d);
+      return acc;
+    }, {} as Record<string, typeof details>);
 
-  // Gắn vào từng order object trả về
-  const ordersWithDetails = orders.map(o => {
-    const plain = o.toObject ? o.toObject() : (o as any);
-    plain.orderDetails = detailsByOrder[o._id.toString()] || [];
-    return plain;
-  });
+    // Gắn vào từng order object trả về
+    const ordersWithDetails = orders.map(o => {
+      const plain = (o.toObject ? o.toObject() : o) as Record<string, unknown>;
+      plain.orderDetails = detailsByOrder[o._id.toString()] || [];
+      return plain;
+    });
 
-  return {
-    data: ordersWithDetails,
-    pagination: {
-      page: Number(page),
-      limit: Number(limit),
-      total,
-    },
-  };
-}
+    return {
+      data: ordersWithDetails,
+      pagination: {
+        page: Number(page),
+        limit: Number(limit),
+        total,
+      },
+    };
+  }
 
 
   // ---------- tracking ----------
@@ -381,9 +449,10 @@ async findByUser(userId: string, query: any) {
     const order = await this.orderModel.findById(orderId).populate('shipper', 'name phone');
     if (!order) throw new NotFoundException('Không tìm thấy đơn hàng');
 
-    const shipperLocation = (order as any).shipperLocation || ((order as any).shipper ? (order as any).shipper.location : null);
+    const extOrder = order as ExtendedOrderDocument;
+    const shipperLocation = extOrder.shipperLocation || null;
     const deliveryCoords = order.deliveryAddress?.coordinates || null;
-    const tracking: any = {
+    const tracking = {
       orderId: order._id.toString(),
       status: order.status,
       estimatedDeliveryTime: order.timing?.estimatedDeliveryTime,
@@ -412,45 +481,44 @@ async findByUser(userId: string, query: any) {
     const order = await this.orderModel.findById(orderId);
     if (!order) throw new NotFoundException('Không tìm thấy đơn hàng');
     if (order.restaurant?.toString() !== restaurantId?.toString()) throw new ForbiddenException('Bạn không có quyền thao tác đơn hàng này');
-    if ((order.status as any) !== ((OrderStatus as any).PENDING || 'PENDING')) throw new BadRequestException(`Không thể xác nhận đơn hàng khi trạng thái là ${order.status}`);
+    if (order.status !== OrderStatus.PENDING) throw new BadRequestException(`Không thể xác nhận đơn hàng khi trạng thái là ${order.status}`);
 
-    order.status = (OrderStatus as any).CONFIRMED || 'CONFIRMED';
+    order.status = OrderStatus.CONFIRMED;
     // store preparation minutes in flexible field
-    (order as any).preparationMinutes = dto.preparationTime || (order as any).preparationMinutes || 20;
-    // set preparingTime (schema uses preparingTime)
-    (order as any).timing = order.timing || {};
-    (order as any).timing.preparingTime = new Date();
+    const extOrder = order as ExtendedOrderDocument;
+    extOrder.preparationMinutes = dto.preparationTime || extOrder.preparationMinutes || 20;
+    if (!order.timing) order.timing = { orderTime: new Date() };
+    order.timing.preparingTime = new Date();
     order.orderNote = dto.note || order.orderNote;
 
     if (typeof order.distanceKm === 'number') {
-      const prepMins = (order as any).preparationMinutes || 20;
-      (order as any).timing.estimatedDeliveryTime = this.calculateEstimatedDeliveryTime(order.distanceKm, prepMins);
+      const prepMins = extOrder.preparationMinutes || 20;
+      order.timing.estimatedDeliveryTime = this.calculateEstimatedDeliveryTime(order.distanceKm, prepMins);
     }
 
     await order.save();
     return order;
   }
 
-  async updateOrderStatusByRestaurant(orderId: string, restaurantId: string, newStatus: any) {
+  async updateOrderStatusByRestaurant(orderId: string, restaurantId: string, newStatus: OrderStatus) {
     if (!isValidObjectId(orderId)) throw new NotFoundException('ID đơn hàng không hợp lệ');
     const order = await this.orderModel.findById(orderId);
     if (!order) throw new NotFoundException('Không tìm thấy đơn hàng');
     if (order.restaurant?.toString() !== restaurantId?.toString()) throw new ForbiddenException('Bạn không có quyền thao tác đơn hàng này');
 
-    // do not enforce a strict enum transition map here (keeps type-safety problems away)
     order.status = newStatus;
-    if (String(newStatus) === String((OrderStatus as any).PREPARING || 'PREPARING')) (order as any).timing.preparingTime = new Date();
-    if (String(newStatus) === String((OrderStatus as any).READY || 'READY')) (order as any).timing.readyTime = new Date();
+    if (newStatus === OrderStatus.PREPARING) order.timing.preparingTime = new Date();
+    if (newStatus === OrderStatus.READY) order.timing.readyTime = new Date();
 
     await order.save();
     return order;
   }
 
   // ---------- shipper endpoints ----------
-  async getAvailableOrdersForShipper(shipperId: string, query: any) {
+  async getAvailableOrdersForShipper(shipperId: string, query: ShipperLocationQuery) {
     const { maxDistance = 10, lat, lng } = query || {};
-    const filter: any = {
-      status: { $in: [(OrderStatus as any).CONFIRMED || 'CONFIRMED', (OrderStatus as any).READY || 'READY'] },
+    const filter: OrderQueryFilter = {
+      status: { $in: [OrderStatus.CONFIRMED, OrderStatus.READY] },
       shipper: { $exists: false },
     };
 
@@ -459,19 +527,20 @@ async findByUser(userId: string, query: any) {
       const shipCoords: [number, number] = [Number(lng), Number(lat)];
       const maxD = Number(maxDistance);
       return orders.filter(o => {
-        const coords = (o as any).deliveryAddress?.coordinates;
+        const extO = o as ExtendedOrderDocument;
+        const coords = o.deliveryAddress?.coordinates;
         if (!coords) return false;
         const dist = this.haversineDistance(shipCoords, coords as [number, number]);
-        (o as any).distanceFromShipper = dist;
+        extO.distanceFromShipper = dist;
         return dist <= maxD;
       });
     }
     return orders;
   }
 
-  async findShipperOrders(shipperId: string, query: any) {
+  async findShipperOrders(shipperId: string, query: PaginationQuery) {
     const { page = 1, limit = 10, status } = query || {};
-    const filter: any = { shipper: new Types.ObjectId(shipperId) };
+    const filter: OrderQueryFilter = { shipper: new Types.ObjectId(shipperId) };
     if (status) filter.status = status;
     const skip = (Number(page) - 1) * Number(limit);
     const [data, total] = await Promise.all([
@@ -485,46 +554,56 @@ async findByUser(userId: string, query: any) {
     if (!isValidObjectId(orderId)) throw new NotFoundException('ID đơn hàng không hợp lệ');
     const order = await this.orderModel.findById(orderId);
     if (!order) throw new NotFoundException('Không tìm thấy đơn hàng');
-    if (![(OrderStatus as any).CONFIRMED || 'CONFIRMED', (OrderStatus as any).READY || 'READY'].includes(order.status as any)) {
+    if (![OrderStatus.CONFIRMED, OrderStatus.READY].includes(order.status)) {
       throw new BadRequestException(`Không thể nhận đơn khi trạng thái là ${order.status}`);
     }
     if (order.shipper) throw new BadRequestException('Đơn đã được giao cho shipper khác');
 
-    order.shipper = new Types.ObjectId(shipperId) as any;
-    order.status = (OrderStatus as any).ASSIGNED || 'ASSIGNED';
-    (order as any).timing.assignedTime = new Date();
+    order.shipper = new Types.ObjectId(shipperId);
+    order.status = OrderStatus.ASSIGNED;
+    order.timing.assignedTime = new Date();
 
     await order.save();
     return order;
   }
 
-  async updateShipperLocation(orderId: string, shipperId: string, coordinates: [number, number]) {
+   async updateShipperLocation(orderId: string, shipperId: string, coordinates: [number, number]) {
     if (!isValidObjectId(orderId)) throw new NotFoundException('ID đơn hàng không hợp lệ');
     const order = await this.orderModel.findById(orderId);
     if (!order) throw new NotFoundException('Không tìm thấy đơn hàng');
-    if (!order.shipper || order.shipper.toString() !== shipperId.toString()) throw new ForbiddenException('Bạn không có quyền cập nhật vị trí cho đơn hàng này');
+    if (!order.shipper || order.shipper.toString() !== shipperId.toString()) {
+      throw new ForbiddenException('Bạn không có quyền cập nhật vị trí cho đơn hàng này');
+    }
 
-    (order as any).shipperLocation = coordinates;
-    (order as any).timing.lastLocationUpdateAt = new Date();
+    const extOrder = order as ExtendedOrderDocument;
+    extOrder.shipperLocation = coordinates;
+
+    if (!order.timing) order.timing = { orderTime: new Date() };
+
+    // ✅ FIX: cast to avoid TS2339
+    (order.timing as unknown as { lastLocationUpdateAt?: Date }).lastLocationUpdateAt = new Date();
 
     if (order.deliveryAddress?.coordinates) {
-      const dist = this.haversineDistance(coordinates as [number, number], order.deliveryAddress.coordinates as [number, number]);
-      (order as any).lastComputedDistanceToDestination = dist;
+      const dist = this.haversineDistance(
+        coordinates as [number, number],
+        order.deliveryAddress.coordinates as [number, number],
+      );
+      extOrder.lastComputedDistanceToDestination = dist;
     }
 
     await order.save();
     return order;
   }
 
-  async updateStatusByShipper(orderId: string, shipperId: string, newStatus: any) {
+  async updateStatusByShipper(orderId: string, shipperId: string, newStatus: OrderStatus) {
     if (!isValidObjectId(orderId)) throw new NotFoundException('ID đơn hàng không hợp lệ');
     const order = await this.orderModel.findById(orderId);
     if (!order) throw new NotFoundException('Không tìm thấy đơn hàng');
     if (!order.shipper || order.shipper.toString() !== shipperId.toString()) throw new ForbiddenException('Bạn không có quyền cập nhật trạng thái cho đơn này');
 
     order.status = newStatus;
-    if (String(newStatus) === String((OrderStatus as any).PICKED_UP || 'PICKED_UP')) (order as any).timing.pickedUpTime = new Date();
-    if (String(newStatus) === String((OrderStatus as any).DELIVERED || 'DELIVERED')) (order as any).timing.deliveredTime = new Date();
+    if (newStatus === OrderStatus.PICKING_UP) order.timing.pickedUpTime = new Date();
+    if (newStatus === OrderStatus.DELIVERED) order.timing.deliveredTime = new Date();
 
     await order.save();
     return order;
@@ -535,7 +614,7 @@ async findByUser(userId: string, query: any) {
     if (!isValidObjectId(orderId)) throw new NotFoundException('ID không hợp lệ');
     const order = await this.orderModel.findById(orderId);
     if (!order) throw new NotFoundException('Không tìm thấy đơn hàng');
-    Object.keys(dto || {}).forEach(k => (order as any)[k] = (dto as any)[k]);
+    Object.assign(order, dto);
     await order.save();
     return order;
   }
@@ -553,9 +632,9 @@ async findByUser(userId: string, query: any) {
     if (!order) throw new NotFoundException('Không tìm thấy đơn hàng');
     if (!shipper) throw new NotFoundException('Không tìm thấy shipper');
 
-    order.shipper = new Types.ObjectId(shipperId) as any;
-    order.status = (OrderStatus as any).ASSIGNED || 'ASSIGNED';
-    (order as any).timing.assignedTime = new Date();
+    order.shipper = new Types.ObjectId(shipperId);
+    order.status = OrderStatus.ASSIGNED;
+    order.timing.assignedTime = new Date();
 
     await order.save();
     return order;
@@ -566,10 +645,11 @@ async findByUser(userId: string, query: any) {
     const order = await this.orderModel.findById(orderId);
     if (!order) throw new NotFoundException('Không tìm thấy đơn hàng');
 
-    order.paymentStatus = (PaymentStatus as any).REFUNDED || PaymentStatus.PENDING;
-    (order as any).refunds = (order as any).refunds || [];
-    (order as any).refunds.push({ amount: refundAmount, reason, refundedAt: new Date() });
-    order.fees = order.fees || ({} as any);
+    order.paymentStatus = PaymentStatus.REFUNDED;
+    const extOrder = order as ExtendedOrderDocument;
+    extOrder.refunds = extOrder.refunds || [];
+    extOrder.refunds.push({ amount: refundAmount, reason, refundedAt: new Date() });
+    order.fees = order.fees || { subtotal: 0, deliveryFee: 0, serviceFee: 0, discount: 0, tax: 0, totalAmount: 0 };
     order.fees.totalAmount = (order.fees.totalAmount || 0) - (refundAmount || 0);
 
     await order.save();
@@ -581,12 +661,12 @@ async findByUser(userId: string, query: any) {
     if (!isValidObjectId(orderId)) throw new NotFoundException('ID không hợp lệ');
     const order = await this.orderModel.findOne({ _id: orderId, user: new Types.ObjectId(userId) });
     if (!order) throw new NotFoundException('Không tìm thấy đơn hàng');
-    if (order.status !== ((OrderStatus as any).DELIVERED || 'DELIVERED')) throw new BadRequestException('Chỉ có thể đánh giá đơn hàng đã giao thành công');
-    if ((order as any).rating) throw new BadRequestException('Đơn hàng này đã được đánh giá');
+    if (order.status !== OrderStatus.DELIVERED) throw new BadRequestException('Chỉ có thể đánh giá đơn hàng đã giao thành công');
+    if (order.rating) throw new BadRequestException('Đơn hàng này đã được đánh giá');
 
-    (order as any).rating = dto.rating;
-    (order as any).ratingComment = dto.comment;
-    (order as any).ratingTime = new Date();
+    order.rating = dto.rating;
+    order.ratingComment = dto.comment;
+    order.ratingTime = new Date();
     await order.save();
     return order;
   }
@@ -597,27 +677,28 @@ async findByUser(userId: string, query: any) {
     if (!order) throw new NotFoundException('Không tìm thấy đơn hàng');
 
     const cancellable = [
-      (OrderStatus as any).PENDING || 'PENDING',
-      (OrderStatus as any).CONFIRMED || 'CONFIRMED',
-      (OrderStatus as any).PREPARING || 'PREPARING',
+      OrderStatus.PENDING,
+      OrderStatus.CONFIRMED,
+      OrderStatus.PREPARING,
     ];
-    if (!cancellable.includes(order.status as any)) throw new BadRequestException(`Không thể hủy đơn hàng ở trạng thái ${order.status}`);
+    if (!cancellable.includes(order.status)) throw new BadRequestException(`Không thể hủy đơn hàng ở trạng thái ${order.status}`);
 
-    order.status = (OrderStatus as any).CANCELLED || 'CANCELLED';
-    (order as any).cancellationReason = dto.reason;
-    (order as any).cancelledBy = dto.cancelledBy || 'user';
-    (order as any).cancelledTime = new Date();
+    order.status = OrderStatus.CANCELLED;
+    order.cancellationReason = dto.reason;
+    order.cancelledBy = dto.cancelledBy || 'user';
+    order.cancelledTime = new Date();
 
     if (order.paymentStatus === PaymentStatus.PAID) {
-      order.paymentStatus = (PaymentStatus as any).REFUND_PENDING || PaymentStatus.PAID;
-      (order as any).refunds = (order as any).refunds || [];
-      (order as any).refunds.push({ amount: order.fees?.totalAmount || 0, reason: 'Auto refund for cancelled order', requestedAt: new Date() });
+      order.paymentStatus = PaymentStatus.PAID; // or create REFUND_PENDING if exists
+      const extOrder = order as ExtendedOrderDocument;
+      extOrder.refunds = extOrder.refunds || [];
+      extOrder.refunds.push({ amount: order.fees?.totalAmount || 0, reason: 'Auto refund for cancelled order', requestedAt: new Date() });
     }
 
     await order.save();
     return order;
   }
-    async findOne(id: string): Promise<OrderDocument> {
+  async findOne(id: string): Promise<OrderDocument> {
     if (!isValidObjectId(id)) throw new NotFoundException('ID đơn hàng không hợp lệ');
     const order = await this.orderModel
       .findById(id)
@@ -629,21 +710,21 @@ async findByUser(userId: string, query: any) {
   }
 
   // ---------- analytics ----------
-  async getRevenueAnalytics(query: any, user: any) {
+  async getRevenueAnalytics(query: AnalyticsQuery, user: unknown) {
     const { startDate, endDate, restaurantId, period = 'day' } = query || {};
-    const match: any = { status: (OrderStatus as any).DELIVERED || 'DELIVERED' };
+    const match: OrderQueryFilter = { status: OrderStatus.DELIVERED };
 
     if (startDate) match['timing.orderTime'] = { $gte: new Date(startDate) };
     if (endDate) match['timing.orderTime'] = match['timing.orderTime'] ? { ...match['timing.orderTime'], $lte: new Date(endDate) } : { $lte: new Date(endDate) };
     if (restaurantId) match.restaurant = new Types.ObjectId(restaurantId);
 
-    let groupId: any;
+    let groupId: Record<string, unknown>;
     if (period === 'month') groupId = { year: { $year: '$timing.orderTime' }, month: { $month: '$timing.orderTime' } };
     else if (period === 'week') groupId = { year: { $year: '$timing.orderTime' }, week: { $week: '$timing.orderTime' } };
     else groupId = { year: { $year: '$timing.orderTime' }, month: { $month: '$timing.orderTime' }, day: { $dayOfMonth: '$timing.orderTime' } };
 
     const pipeline: PipelineStage[] = [];
-    pipeline.push({ $match: match } as any);
+    pipeline.push({ $match: match });
     pipeline.push({
       $group: {
         _id: groupId,
@@ -651,42 +732,42 @@ async findByUser(userId: string, query: any) {
         orders: { $sum: 1 },
         avgOrderValue: { $avg: '$fees.totalAmount' },
       },
-    } as any);
+    } as PipelineStage);
 
-    const sortObj: any = {};
+    const sortObj: Record<string, 1 | -1> = {};
     if (period === 'month') { sortObj['_id.year'] = 1; sortObj['_id.month'] = 1; }
     else if (period === 'week') { sortObj['_id.year'] = 1; sortObj['_id.week'] = 1; }
     else { sortObj['_id.year'] = 1; sortObj['_id.month'] = 1; sortObj['_id.day'] = 1; }
 
-    pipeline.push({ $sort: sortObj } as any);
+    pipeline.push({ $sort: sortObj });
 
-    const res = await this.orderModel.aggregate(pipeline as any);
+    const res = await this.orderModel.aggregate(pipeline);
     return res;
   }
 
-  async getPerformanceAnalytics(query: any) {
-    const match: any = {};
+  async getPerformanceAnalytics(query: AnalyticsQuery) {
+    const match: OrderQueryFilter = {};
     if (query.startDate) match['timing.orderTime'] = { $gte: new Date(query.startDate) };
     if (query.endDate) match['timing.orderTime'] = match['timing.orderTime'] ? { ...match['timing.orderTime'], $lte: new Date(query.endDate) } : { $lte: new Date(query.endDate) };
 
     const pipeline: PipelineStage[] = [
-      { $match: match } as any,
+      { $match: match },
       {
         $group: {
           _id: null,
           totalOrders: { $sum: 1 },
-          deliveredCount: { $sum: { $cond: [{ $eq: ['$status', (OrderStatus as any).DELIVERED || 'DELIVERED'] }, 1, 0] } },
-          cancelledCount: { $sum: { $cond: [{ $eq: ['$status', (OrderStatus as any).CANCELLED || 'CANCELLED'] }, 1, 0] } },
+          deliveredCount: { $sum: { $cond: [{ $eq: ['$status', OrderStatus.DELIVERED] }, 1, 0] } },
+          cancelledCount: { $sum: { $cond: [{ $eq: ['$status', OrderStatus.CANCELLED] }, 1, 0] } },
           avgFulfillmentMinutes: {
             $avg: {
               $divide: [{ $subtract: ['$timing.deliveredTime', '$timing.orderTime'] }, 1000 * 60],
             },
           },
         },
-      } as any,
+      },
     ];
 
-    const agg = await this.orderModel.aggregate(pipeline as any);
+    const agg = await this.orderModel.aggregate(pipeline);
     return agg[0] || { totalOrders: 0, deliveredCount: 0, cancelledCount: 0, avgFulfillmentMinutes: null };
   }
 }

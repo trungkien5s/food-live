@@ -9,6 +9,7 @@ import { MenuItem, MenuItemSchema } from '@/modules/menu.items/schemas/menu.item
 import { MenuItemOption, MenuItemOptionSchema } from '@/modules/menu.item.options/schemas/menu.item.option.schema';
 import { Cart, CartSchema } from '../carts/schemas/carts.schema';
 import { Restaurant, RestaurantSchema } from '../restaurants/schemas/restaurant.schema';
+import { CartsService } from '../carts/carts.service';
 
 @Module({
   imports: [

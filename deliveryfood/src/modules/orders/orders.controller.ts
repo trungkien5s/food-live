@@ -9,11 +9,13 @@ import { OrderStatus, PaymentMethod, PaymentStatus } from './schemas/order.schem
 import { JwtAuthGuard } from '@/auth/passport/jwt-auth.guard';
 import { RolesGuard } from '@/auth/passport/roles.guard';
 import { Roles } from '@/decorator/roles.decorator';
+import { AuthenticatedRequest } from '@/common/interfaces/auth-request.interface';
+import { CreateOrderFromCartDto } from './dto/create-order-from-cart.dto';
 
 @ApiTags('Orders')
 @Controller('orders')
 export class OrdersController {
-  constructor(private readonly ordersService: OrdersService) {}
+  constructor(private readonly ordersService: OrdersService) { }
 
   @Post('')
   @ApiOperation({ summary: 'Create a new order from selected cart items' })
@@ -58,46 +60,26 @@ export class OrdersController {
       }
     }
   })
-  createFromCart(@Req() req, @Body() dto: CreateOrderDto) {
+  createFromCart(@Req() req: AuthenticatedRequest, @Body() dto: CreateOrderDto) {
     return this.ordersService.createFromCartItems(req.user._id, dto);
   }
-
   @Post('restaurant/:restaurantId')
   @ApiOperation({ summary: 'Create a new order from all cart items of a restaurant' })
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiParam({ name: 'restaurantId', description: 'Restaurant ID' })
-  @ApiBody({
-    schema: {
-      example: {
-        deliveryAddress: {
-          street: '123 Nguyễn Du',
-          ward: 'Phường Hai Bà Trưng',
-          district: 'Quận Hoàn Kiếm',
-          city: 'Hà Nội',
-          fullAddress: '123 Nguyễn Du, Phường Hai Bà Trưng, Quận Hoàn Kiếm, Hà Nội',
-          recipientName: 'Nguyễn Văn A',
-          recipientPhone: '0987654321',
-          coordinates: [105.8542, 21.0285]
-        },
-        paymentMethod: 'CASH',
-        distanceKm: 5.2,
-        estimatedDeliveryMinutes: 30
-      }
-    }
-  })
+  @ApiBody({ type: CreateOrderFromCartDto }) // ✅ dùng DTO class
   @ApiResponse({
     status: 201,
     description: 'Successfully created order from all cart items of the restaurant',
   })
   createFromRestaurantCart(
-    @Req() req,
+    @Req() req: AuthenticatedRequest,
     @Param('restaurantId') restaurantId: string,
-    @Body() dto: any
+    @Body() dto: CreateOrderFromCartDto, 
   ) {
     return this.ordersService.createFromCart(req.user._id, restaurantId, dto);
   }
-
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('ADMIN')
   @ApiBearerAuth()
@@ -150,7 +132,7 @@ export class OrdersController {
       }
     }
   })
-  findAll(@Query() query: any) {
+  findAll(@Query() query: { status?: OrderStatus; paymentMethod?: PaymentMethod; paymentStatus?: PaymentStatus; page?: number; limit?: number }) {
     return this.ordersService.findAll(query);
   }
 
@@ -165,7 +147,7 @@ export class OrdersController {
     status: 200,
     description: 'List of orders created by the current user',
   })
-  findMyOrders(@Req() req, @Query() query: any) {
+  findMyOrders(@Req() req: AuthenticatedRequest, @Query() query: { status?: OrderStatus; page?: number; limit?: number }) {
     return this.ordersService.findByUser(req.user._id, query);
   }
 
@@ -192,7 +174,7 @@ export class OrdersController {
       }
     }
   })
-  getOrderTracking(@Param('id') id: string, @Req() req) {
+  getOrderTracking(@Param('id') id: string, @Req() req: AuthenticatedRequest) {
     return this.ordersService.getOrderTracking(id, req.user._id);
   }
 
@@ -216,7 +198,7 @@ export class OrdersController {
   updateDeliveryAddress(
     @Param('id') id: string,
     @Body() dto: UpdateDeliveryAddressDto,
-    @Req() req
+    @Req() req: AuthenticatedRequest
   ) {
     return this.ordersService.updateDeliveryAddress(id, req.user._id, dto);
   }
@@ -235,7 +217,7 @@ export class OrdersController {
   rateOrder(
     @Param('id') id: string,
     @Body() dto: RateOrderDto,
-    @Req() req
+    @Req() req: AuthenticatedRequest
   ) {
     return this.ordersService.rateOrder(id, req.user._id, dto);
   }
@@ -254,13 +236,13 @@ export class OrdersController {
   cancelOrder(
     @Param('id') id: string,
     @Body() dto: CancelOrderDto,
-    @Req() req
+    @Req() req: AuthenticatedRequest
   ) {
     return this.ordersService.cancelOrder(id, req.user._id, dto);
   }
 
   // ============ RESTAURANT ENDPOINTS ============
-  
+
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('RESTAURANT', 'ADMIN')
   @ApiBearerAuth()
@@ -269,7 +251,7 @@ export class OrdersController {
   @ApiQuery({ name: 'status', required: false, enum: OrderStatus })
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'limit', required: false, type: Number })
-  findRestaurantOrders(@Req() req, @Query() query: any) {
+  findRestaurantOrders(@Req() req: AuthenticatedRequest, @Query() query: { status?: OrderStatus; page?: number; limit?: number }) {
     return this.ordersService.findRestaurantOrders(req.user.restaurantId, query);
   }
 
@@ -290,7 +272,7 @@ export class OrdersController {
   confirmOrder(
     @Param('id') id: string,
     @Body() dto: { preparationTime?: number; note?: string },
-    @Req() req
+    @Req() req: AuthenticatedRequest
   ) {
     return this.ordersService.confirmOrder(id, req.user.restaurantId, dto);
   }
@@ -311,7 +293,7 @@ export class OrdersController {
   updateOrderStatusByRestaurant(
     @Param('id') id: string,
     @Body() dto: { status: OrderStatus },
-    @Req() req
+    @Req() req: AuthenticatedRequest
   ) {
     return this.ordersService.updateOrderStatusByRestaurant(id, req.user.restaurantId, dto.status);
   }
@@ -326,7 +308,7 @@ export class OrdersController {
   @ApiQuery({ name: 'maxDistance', required: false, type: Number, description: 'Maximum distance in km' })
   @ApiQuery({ name: 'lat', required: false, type: Number, description: 'Shipper latitude' })
   @ApiQuery({ name: 'lng', required: false, type: Number, description: 'Shipper longitude' })
-  getAvailableOrders(@Req() req, @Query() query: any) {
+  getAvailableOrders(@Req() req: AuthenticatedRequest, @Query() query: { maxDistance?: number; lat?: number; lng?: number }) {
     return this.ordersService.getAvailableOrdersForShipper(req.user.shipperId, query);
   }
 
@@ -336,7 +318,7 @@ export class OrdersController {
   @Get('shipper/my-orders')
   @ApiOperation({ summary: 'Get shipper\'s assigned orders' })
   @ApiQuery({ name: 'status', required: false, enum: OrderStatus })
-  findShipperOrders(@Req() req, @Query() query: any) {
+  findShipperOrders(@Req() req: AuthenticatedRequest, @Query() query: { status?: OrderStatus; page?: number; limit?: number }) {
     return this.ordersService.findShipperOrders(req.user.shipperId, query);
   }
 
@@ -346,7 +328,7 @@ export class OrdersController {
   @Post(':id/accept')
   @ApiOperation({ summary: 'Shipper accepts an order' })
   @ApiParam({ name: 'id', description: 'Order ID' })
-  acceptOrder(@Param('id') id: string, @Req() req) {
+  acceptOrder(@Param('id') id: string, @Req() req: AuthenticatedRequest) {
     return this.ordersService.acceptOrderByShipper(id, req.user.shipperId);
   }
 
@@ -360,7 +342,7 @@ export class OrdersController {
   updateShipperLocation(
     @Param('id') id: string,
     @Body() dto: UpdateShipperLocationDto,
-    @Req() req
+    @Req() req: AuthenticatedRequest
   ) {
     return this.ordersService.updateShipperLocation(id, req.user.shipperId, dto.coordinates);
   }
@@ -381,7 +363,7 @@ export class OrdersController {
   updateStatusByShipper(
     @Param('id') id: string,
     @Body() dto: { status: OrderStatus },
-    @Req() req
+    @Req() req: AuthenticatedRequest
   ) {
     return this.ordersService.updateStatusByShipper(id, req.user.shipperId, dto.status);
   }
@@ -454,7 +436,7 @@ export class OrdersController {
   @ApiQuery({ name: 'startDate', required: false, type: String })
   @ApiQuery({ name: 'endDate', required: false, type: String })
   @ApiQuery({ name: 'restaurantId', required: false, type: String })
-  getRevenueAnalytics(@Query() query: any, @Req() req) {
+  getRevenueAnalytics(@Query() query: { startDate?: string; endDate?: string; restaurantId?: string; period?: 'day' | 'week' | 'month' }, @Req() req: AuthenticatedRequest) {
     return this.ordersService.getRevenueAnalytics(query, req.user);
   }
 
@@ -464,7 +446,7 @@ export class OrdersController {
   @Get('analytics/performance')
   @ApiOperation({ summary: 'Get order performance analytics' })
   @ApiQuery({ name: 'period', required: false, enum: ['day', 'week', 'month'] })
-  getPerformanceAnalytics(@Query() query: any) {
+  getPerformanceAnalytics(@Query() query: { startDate?: string; endDate?: string; period?: 'day' | 'week' | 'month' }) {
     return this.ordersService.getPerformanceAnalytics(query);
   }
 }

@@ -16,6 +16,7 @@ import * as bcrypt from 'bcrypt';
 import { plainToInstance } from 'class-transformer';
 import { UserProfileDto } from './dto/user-profile.dto';
 import { randomBytes } from 'crypto';
+import { UserIdResponse, MessageResponse, PaginatedUsersResponse } from './interfaces/user-response.interface';
 
 @Injectable()
 export class UsersService {
@@ -23,14 +24,14 @@ export class UsersService {
     @InjectModel(User.name)
     private userModel: Model<User>,
     private readonly mailerService: MailerService,
-  ) {}
+  ) { }
 
   async isEmailExist(email: string) {
     const user = await this.userModel.exists({ email });
     return !!user;
   }
 
-  async create(createUserDto: CreateUserDto) {
+  async create(createUserDto: CreateUserDto): Promise<UserIdResponse> {
     const { name, email, password, phone, address, image } = createUserDto;
 
     const isExist = await this.isEmailExist(email);
@@ -56,7 +57,7 @@ export class UsersService {
     current = 1,
     pageSize = 10,
     role?: string,
-  ): Promise<{ results: User[]; totalPages: number }> {
+  ): Promise<PaginatedUsersResponse> {
     const { filter: rawFilter, sort: rawSort } = aqp(query);
 
     // Loại bỏ pageSize, current khỏi filter
@@ -68,7 +69,7 @@ export class UsersService {
     }
 
     // Chuyển sort về kiểu đúng
-    const parsedSort: Record<string, any> = rawSort || {};
+    const parsedSort: Record<string, unknown> = rawSort || {};
     const sort: Record<string, 1 | -1> = {};
 
     for (const key in parsedSort) {
@@ -92,9 +93,11 @@ export class UsersService {
     return { results, totalPages };
   }
 
-  async findByEmail(email: string){
+
+  async findByEmail(email: string): Promise<User | null> {
     return await this.userModel.findOne({ email });
   }
+
 
   async findOne(id: string): Promise<UserProfileDto> {
     if (!mongoose.isValidObjectId(id)) {
@@ -113,7 +116,7 @@ export class UsersService {
     return plainToInstance(UserProfileDto, user.toObject());
   }
 
-  async update(id: string, dto: UpdateUserDto) {
+  async update(id: string, dto: UpdateUserDto): Promise<MessageResponse> {
     if (!mongoose.isValidObjectId(id)) {
       throw new BadRequestException('Id không đúng định dạng');
     }
@@ -127,7 +130,7 @@ export class UsersService {
   }
 
   // Activate user: clear both numeric code and token flows
-  async activateUser(userId: string) {
+  async activateUser(userId: string): Promise<User | null> {
     return await this.userModel.findByIdAndUpdate(
       userId,
       {
@@ -143,7 +146,7 @@ export class UsersService {
   }
 
   // Legacy numeric code updater (kept for backward compatibility)
-  async updateActivationCode(userId: string, activationCode: string, expiry: Date) {
+  async updateActivationCode(userId: string, activationCode: string, expiry: Date): Promise<User | null> {
     return await this.userModel.findByIdAndUpdate(
       userId,
       {
@@ -155,7 +158,7 @@ export class UsersService {
   }
 
   // NEW: store activation token (link flow)
-  async updateActivationToken(userId: string, token: string, expiry: Date) {
+  async updateActivationToken(userId: string, token: string, expiry: Date): Promise<User | null> {
     return await this.userModel.findByIdAndUpdate(
       userId,
       {
@@ -170,14 +173,14 @@ export class UsersService {
   }
 
   // NEW: find by activation token (not expired)
-  async findByActivationToken(token: string) {
+  async findByActivationToken(token: string): Promise<User | null> {
     return this.userModel.findOne({
       activationToken: token,
       activationTokenExpiry: { $gt: new Date() },
     });
   }
 
-  async remove(_id: string) {
+  async remove(_id: string): Promise<MessageResponse> {
     if (!mongoose.isValidObjectId(_id)) {
       throw new BadRequestException('Id không đúng định dạng');
     }
@@ -191,7 +194,7 @@ export class UsersService {
     return { message: 'Xoá thành công' };
   }
 
-  async changeRole(id: string, role: string) {
+  async changeRole(id: string, role: string): Promise<MessageResponse> {
     if (!mongoose.isValidObjectId(id)) {
       throw new BadRequestException('Id không đúng định dạng');
     }
@@ -199,7 +202,7 @@ export class UsersService {
     return { message: 'Đổi role thành công' };
   }
 
-  async requestPasswordReset(email: string) {
+  async requestPasswordReset(email: string): Promise<MessageResponse> {
     const user = await this.userModel.findOne({ email });
     if (!user) {
       throw new BadRequestException('Email không tồn tại');
@@ -223,7 +226,7 @@ export class UsersService {
     return { message: 'Đã gửi email reset password' };
   }
 
-  async verifyResetCode(email: string, code: string) {
+  async verifyResetCode(email: string, code: string): Promise<MessageResponse> {
     const user = await this.userModel.findOne({ email, resetCode: code });
 
     if (!user) {
@@ -237,7 +240,7 @@ export class UsersService {
     return { message: 'Mã xác nhận hợp lệ' };
   }
 
-  async resetPassword(code: string, newPassword: string) {
+  async resetPassword(code: string, newPassword: string): Promise<MessageResponse> {
     const user = await this.userModel.findOne({ resetCode: code });
 
     if (!user) {
@@ -257,7 +260,7 @@ export class UsersService {
     return { message: 'Đổi mật khẩu thành công' };
   }
 
-  async saveRefreshToken(userId: string, refreshToken: string, expiry: Date) {
+  async saveRefreshToken(userId: string, refreshToken: string, expiry: Date): Promise<User | null> {
     return this.userModel.findByIdAndUpdate(
       userId,
       {
@@ -272,7 +275,7 @@ export class UsersService {
     return this.userModel.findById(userId).exec();
   }
 
-  async removeRefreshToken(userId: string) {
+  async removeRefreshToken(userId: string): Promise<User | null> {
     return this.userModel.findByIdAndUpdate(
       userId,
       { $unset: { refreshToken: "", refreshTokenExpiry: "" } },
@@ -280,7 +283,7 @@ export class UsersService {
     );
   }
 
-  async changePassword(userId: string, oldPassword: string, newPassword: string) {
+  async changePassword(userId: string, oldPassword: string, newPassword: string): Promise<MessageResponse> {
     const user = await this.userModel.findById(userId);
 
     if (!user) {
@@ -302,7 +305,7 @@ export class UsersService {
   }
 
   // UPDATED: register flow now issues activation LINK (token) by default
-  async handleRegister(registerDto: CreateAuthDto) {
+  async handleRegister(registerDto: CreateAuthDto): Promise<UserIdResponse> {
     const { name, email, password } = registerDto;
 
     const isExist = await this.isEmailExist(email);

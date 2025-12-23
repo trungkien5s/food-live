@@ -1,178 +1,220 @@
 // src/auth/auth.service.ts
 import { comparePasswordHelper } from '@/helpers/util';
 import { UsersService } from '@/modules/users/users.service';
-import { Injectable, UnauthorizedException, BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  UnauthorizedException,
+  BadRequestException,
+  NotFoundException,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { CreateAuthDto } from './dto/create-auth.dto';
 import { MailerService } from '@nestjs-modules/mailer';
 import { randomBytes } from 'crypto';
+import { ConfigService } from '@nestjs/config';
+
+import { CreateAuthDto } from './dto/create-auth.dto';
+import {
+  IUser,
+  LoginResponse,
+  RefreshTokenResponse,
+  LogoutResponse,
+  RegisterResponse,
+  ActivationResponse,
+  UserFromDB,
+  JwtPayload,
+} from './interfaces/auth.interface';
+import { CreateUserDto } from '@/modules/users/dto/create-user.dto';
+
+type MaybeRegisterResult = unknown;
 
 @Injectable()
 export class AuthService {
   constructor(
-    private usersService: UsersService,
-    private jwtService: JwtService,
-    private mailerService: MailerService
+    private readonly usersService: UsersService,
+    private readonly jwtService: JwtService,
+    private readonly mailerService: MailerService,
+    private readonly configService: ConfigService,
   ) {}
 
-  async validateUser(username: string, pass: string): Promise<any> {
-    const user = await this.usersService.findByEmail(username);
+  async validateUser(email: string, pass: string): Promise<UserFromDB | null> {
+    const user = await this.usersService.findByEmail(email);
     if (!user) return null;
 
     const isValidPassword = await comparePasswordHelper(pass, user.password);
     if (!isValidPassword) return null;
 
-    return user;
+    return user as UserFromDB;
   }
 
-  async login(user: any) {
+  async login(user: IUser | UserFromDB): Promise<LoginResponse> {
     if (!user.isActive) {
       throw new BadRequestException('Tài khoản chưa được kích hoạt.');
     }
-    const payload = { username: user.email, sub: user._id, role: user.role };
+
+    const payload: JwtPayload = {
+      username: user.email,
+      sub: user._id.toString(),
+      role: user.role,
+    };
+
+    const accessTokenExpiresIn =
+      this.configService.get<string>('JWT_ACCESS_TOKEN_EXPIRED') ?? '30m';
+
     const accessToken = this.jwtService.sign(payload, {
-      expiresIn: process.env.JWT_ACCESS_TOKEN_EXPIRED || '30m',
+      expiresIn: accessTokenExpiresIn,
     });
 
-    // Tạo refresh token (random)
     const refreshToken = randomBytes(64).toString('hex');
     const refreshTokenExpiry = new Date();
     refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + 7);
 
-    // Lưu refreshToken vào DB (UsersService phải implement)
-    await this.usersService.saveRefreshToken(user._id, refreshToken, refreshTokenExpiry);
+    await this.usersService.saveRefreshToken(
+      user._id.toString(),
+      refreshToken,
+      refreshTokenExpiry,
+    );
 
     return {
-      user: { _id: user._id, email: user.email, name: user.name, role: user.role },
+      user: {
+        _id: user._id.toString(),
+        email: user.email,
+        name: user.name,
+        role: user.role,
+      },
       access_token: accessToken,
       refresh_token: refreshToken,
     };
   }
 
-  async refreshToken(userId: string, refreshToken: string) {
-    // Kiểm tra refresh token trong DB
+  async refreshToken(userId: string, refreshToken: string): Promise<RefreshTokenResponse> {
     const user = await this.usersService.findById(userId);
-    if (
+
+    const invalid =
       !user ||
       !user.refreshToken ||
       user.refreshToken !== refreshToken ||
       !user.refreshTokenExpiry ||
-      new Date() > new Date(user.refreshTokenExpiry)
-    ) {
+      new Date() > new Date(user.refreshTokenExpiry);
+
+    if (invalid) {
       throw new UnauthorizedException('Refresh token không hợp lệ hoặc đã hết hạn.');
     }
-    // Cấp access token mới
-    const payload = { username: user.email, sub: user._id, role: user.role };
+
+    const payload: JwtPayload = {
+      username: user.email,
+      sub: user._id.toString(),
+      role: user.role,
+    };
+
+    const accessTokenExpiresIn =
+      this.configService.get<string>('JWT_ACCESS_TOKEN_EXPIRED') ?? '30m';
+
     const accessToken = this.jwtService.sign(payload, {
-      expiresIn: process.env.JWT_ACCESS_TOKEN_EXPIRED || '30m',
+      expiresIn: accessTokenExpiresIn,
     });
+
     return { access_token: accessToken };
   }
 
-  
-async handleRegister(registerDto: CreateAuthDto) {
-  if (typeof this.usersService.handleRegister === 'function') {
-    return await this.usersService.handleRegister(registerDto);
-  }
+  async handleRegister(registerDto: CreateAuthDto): Promise<RegisterResponse> {
+    // Nếu UsersService có handleRegister và bạn muốn dùng lại logic ở đó:
+    const maybeHandleRegister = (this.usersService as unknown as { handleRegister?: (dto: CreateAuthDto) => Promise<MaybeRegisterResult> })
+      .handleRegister;
 
-  // Kiểm tra email tồn tại
-  const existing = await this.usersService.findByEmail(registerDto.email);
-  if (existing) {
-    throw new BadRequestException('Email already exists');
-  }
+    if (typeof maybeHandleRegister === 'function') {
+      const result = await maybeHandleRegister(registerDto);
 
-  const createUserPayload = {
-    name: registerDto.name,
-    email: registerDto.email,
-    password: registerDto.password,
-    phone: (registerDto as any).phone ?? '',
-    address: (registerDto as any).address ?? '',
-    image: (registerDto as any).image ?? '',
-  } as any; // hoặc 'as CreateUserDto' nếu import được
+      // ✅ FIX TS2741: đảm bảo luôn trả về RegisterResponse có message
+      if (result && typeof result === 'object' && 'message' in (result as Record<string, unknown>)) {
+        const message = (result as { message?: unknown }).message;
+        if (typeof message === 'string') return { message };
+      }
 
-  // Tạo user
-  const created = await this.usersService.create(createUserPayload);
-
-  // Lấy userId an toàn (tùy usersService.create trả document hay chỉ { _id })
-  const userId =
-    created && created._id
-      ? typeof created._id.toString === 'function'
-        ? created._id.toString()
-        : String(created._id)
-      : String(created);
-
-  // tạo activation token (plaintext). Bạn có thể đổi sang hash nếu muốn.
-  const activationToken = randomBytes(32).toString('hex');
-  const activationTokenExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24h
-
-  // Lưu token vào user
-  await this.usersService.updateActivationToken(userId, activationToken, activationTokenExpiry);
-
-  // Gửi email kích hoạt
-  await this.sendActivationEmail(registerDto.email, registerDto.name, activationToken);
-
-  return {
-    message: 'Registration successful! Please check your email to activate your account.',
-  };
-}
-
-
-  async activateAccountByToken(token: string) {
-    const user = await this.usersService.findByActivationToken(token);
-    if (!user) {
-      throw new BadRequestException('Invalid or expired activation token');
+      // fallback nếu UsersService trả về kiểu khác (vd: { _id: '...' })
+      return {
+        message: 'Registration successful! Please check your email to activate your account.',
+      };
     }
+
+    // --------- Default flow nếu không có usersService.handleRegister ----------
+    const existing = await this.usersService.findByEmail(registerDto.email);
+    if (existing) throw new BadRequestException('Email already exists');
+
+    const createUserPayload: CreateUserDto = {
+      name: registerDto.name,
+      email: registerDto.email,
+      password: registerDto.password,
+      phone: registerDto.phone ?? '',
+      address: registerDto.address ?? '',
+      image: registerDto.image ?? '',
+    };
+
+    const created = await this.usersService.create(createUserPayload);
+    const userId = created._id.toString();
+
+    const activationToken = randomBytes(32).toString('hex');
+    const activationTokenExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+    await this.usersService.updateActivationToken(userId, activationToken, activationTokenExpiry);
+    await this.sendActivationEmail(registerDto.email, registerDto.name, activationToken);
+
+    return {
+      message: 'Registration successful! Please check your email to activate your account.',
+    };
+  }
+
+  async activateAccountByToken(token: string): Promise<ActivationResponse> {
+    const user = await this.usersService.findByActivationToken(token);
+    if (!user) throw new BadRequestException('Invalid or expired activation token');
+
     await this.usersService.activateUser(user._id.toString());
     return { message: 'Account activated successfully! You can now login.' };
   }
 
-  async resendActivationLink(email: string) {
+  async resendActivationLink(email: string): Promise<RegisterResponse> {
     const user = await this.usersService.findByEmail(email);
-    
-    if (!user) {
-      throw new NotFoundException('User not found');
-    }
+    if (!user) throw new NotFoundException('User not found');
+    if (user.isActive) throw new BadRequestException('Account is already activated');
 
-    if (user.isActive) {
-      throw new BadRequestException('Account is already activated');
-    }
-
-    // tạo token mới
     const activationToken = randomBytes(32).toString('hex');
     const activationTokenExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
-    // lưu token & expiry (UsersService must implement updateActivationToken)
-    await this.usersService.updateActivationToken(user._id.toString(), activationToken, activationTokenExpiry);
+    await this.usersService.updateActivationToken(
+      user._id.toString(),
+      activationToken,
+      activationTokenExpiry,
+    );
 
-    // gửi email
     await this.sendActivationEmail(user.email, user.name, activationToken);
 
-    return {
-      message: 'Activation link resent successfully! Please check your email.',
-    };
+    return { message: 'Activation link resent successfully! Please check your email.' };
   }
 
-  private async sendActivationEmail(email: string, name: string, token: string) {
-    const activationUrl = `${process.env.FRONTEND_URL || process.env.BACKEND_URL || 'http://localhost:3000'}/auth/activate?token=${token}`;
+  private async sendActivationEmail(email: string, name: string, token: string): Promise<void> {
+    const frontendUrl =
+      this.configService.get<string>('FRONTEND_URL') ??
+      this.configService.get<string>('BACKEND_URL') ??
+      'http://localhost:3000';
+
+    const activationUrl = `${frontendUrl}/auth/activate?token=${token}`;
+
     await this.mailerService.sendMail({
       to: email,
       subject: 'Activate Your Account',
-      template: 'activation', // đảm bảo template này tồn tại
-      context: {
-        name,
-        activationUrl,
-      },
+      template: 'activation',
+      context: { name, activationUrl },
     });
   }
 
-  async logout(user: any) {
-    await this.usersService.removeRefreshToken(user._id || user.sub);
+  async logout(user: IUser): Promise<LogoutResponse> {
+    await this.usersService.removeRefreshToken(user._id.toString());
+
     return {
       message: 'Đăng xuất thành công',
       statusCode: 200,
       data: {
-        userId: user._id || user.sub,
-        email: user.email || user.username,
+        userId: user._id.toString(),
+        email: user.email,
         logoutTime: new Date().toISOString(),
       },
     };
