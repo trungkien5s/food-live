@@ -27,6 +27,6 @@ import { CartItem, CartItemSchema } from '../cart.items/schemas/cart.items.schem
   ],
   controllers: [RestaurantsController],
   providers: [RestaurantsService],
-  exports: [RestaurantsService], // ✅ hữu ích nếu module khác cần gọi
+  exports: [RestaurantsService], 
 })
 export class RestaurantsModule {}

@@ -216,12 +216,12 @@ const OrderCard = ({ order, index }) => {
     const details = order?.orderDetails || order?.items || order?.orderItems || [];
     return Array.isArray(details)
       ? details.map((d) => ({
-          id: d._id || d.id,
-          quantity: d.quantity ?? d.qty ?? 1,
-          price: d.price ?? d.unitPrice ?? (d.menuItem && d.menuItem.price) ?? 0,
-          menuItem: d.menuItem || {},
-          raw: d,
-        }))
+        id: d._id || d.id,
+        quantity: d.quantity ?? d.qty ?? 1,
+        price: d.price ?? d.unitPrice ?? (d.menuItem && d.menuItem.price) ?? 0,
+        menuItem: d.menuItem || {},
+        raw: d,
+      }))
       : [];
   }, [order]);
 

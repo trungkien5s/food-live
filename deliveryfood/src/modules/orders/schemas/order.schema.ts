@@ -3,6 +3,7 @@ import { User } from '@/modules/users/schemas/user.schema';
 import { Shipper } from '@/modules/shippers/schemas/shipper.schema';
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import mongoose, { HydratedDocument } from 'mongoose';
+import { Optional } from '@nestjs/common';
 
 export type OrderDocument = HydratedDocument<Order>;
 

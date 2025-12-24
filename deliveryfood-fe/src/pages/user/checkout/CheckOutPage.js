@@ -520,13 +520,13 @@ export default function CheckOutPage() {
   );
 
   const validate = () => {
-    if (!shipping.fullName?.trim()) return "Vui lòng nhập Họ tên người nhận";
-    if (!shipping.phone?.trim()) return "Vui lòng nhập Số điện thoại";
-    if (!shipping.address?.trim()) return "Vui lòng nhập Địa chỉ giao hàng";
-    // ensure ward/district/city present (backend required)
-    if (!shipping.city?.trim()) return "Vui lòng xác định Tỉnh / Thành phố";
-    return null;
-  };
+  if (!shipping.fullName?.trim()) return "Vui lòng nhập Họ tên người nhận";
+  if (!shipping.phone?.trim()) return "Vui lòng nhập Số điện thoại";
+  if (!shipping.address?.trim()) return "Vui lòng nhập Địa chỉ giao hàng";
+  if (!shipping.city?.trim()) return "Vui lòng xác định Tỉnh / Thành phố";
+  return null;
+};
+
 
   const handleError = (msg) => message.warning(msg);
 
@@ -576,33 +576,21 @@ export default function CheckOutPage() {
     return { ward, district, city };
   };
 
-  const buildDeliveryAddress = ({ address, fullName, phone, lat, lng, ward, district, city }) => {
-    // backend sample expects coordinates as [lng, lat]
-    const coordinates =
-      typeof lng === "number" && typeof lat === "number" ? [Number(lng), Number(lat)] : [];
+  const buildDeliveryAddress = ({ address, fullName, phone, lat, lng, city, addressNote }) => {
+  const coordinates =
+    typeof lng === "number" && typeof lat === "number" ? [Number(lng), Number(lat)] : [];
 
-    // ensure required ward/district/city are filled - fallback to infer from address string
-    let _ward = ward || "";
-    let _district = district || "";
-    let _city = city || "";
-    if ((!_ward || !_district || !_city) && address) {
-      const inferred = inferAddressComponentsFromString(address);
-      _ward = _ward || inferred.ward || "";
-      _district = _district || inferred.district || "";
-      _city = _city || inferred.city || "";
-    }
-
-    return {
-      street: address || "",
-      ward: _ward || "",
-      district: _district || "",
-      city: _city || "",
-      fullAddress: address || "",
-      recipientName: fullName || "",
-      recipientPhone: phone || "",
-      coordinates,
-    };
+  return {
+    street: address || "",
+    city: city || "",                 // BE bắt buộc
+    fullAddress: address || "",
+    note: addressNote || "",          // note nằm TRONG deliveryAddress
+    recipientName: fullName || "",
+    recipientPhone: phone || "",
+    coordinates,
   };
+};
+
 
   const cleanObject = (obj) => {
     // remove undefined fields; keep empty arrays if present
@@ -688,22 +676,25 @@ export default function CheckOutPage() {
       }
 
       const payload = cleanObject({
-        deliveryAddress: buildDeliveryAddress({
-          address: shipping.address,
-          fullName: shipping.fullName,
-          phone: shipping.phone,
-          lat: shipping.lat,
-          lng: shipping.lng,
-          ward: shipping.ward,
-          district: shipping.district,
-          city: shipping.city,
-        }),
-        distanceKm: typeof distanceKm === "number" && isFinite(distanceKm) ? distanceKm : undefined,
-        estimatedDeliveryMinutes:
-          typeof estimatedDeliveryMinutes === "number" ? estimatedDeliveryMinutes : undefined,
-        paymentMethod: mapPaymentMethod(paymentMethod),
-        note: notes[rid] || "",
-      });
+  deliveryAddress: buildDeliveryAddress({
+    address: shipping.address,
+    addressNote: shipping.addressNote,     // đưa vào deliveryAddress.note
+    fullName: shipping.fullName,
+    phone: shipping.phone,
+    lat: shipping.lat,
+    lng: shipping.lng,
+    city: shipping.city,
+  }),
+  distanceKm: isFinite(distanceKm) ? distanceKm : undefined,
+  estimatedDeliveryMinutes: isFinite(estimatedDeliveryMinutes) ? estimatedDeliveryMinutes : undefined,
+  paymentMethod: mapPaymentMethod(paymentMethod),
+
+  // ghi chú cho nhà hàng:
+  orderNote: notes[rid] || "",
+  // nếu bạn có ghi chú shipper riêng:
+  // deliveryNote: shipping.deliveryNote || "",
+});
+
 
       const created = await dispatch(createOrderFromRestaurant({ restaurantId: rid, orderData: payload })).unwrap();
 
@@ -840,17 +831,17 @@ export default function CheckOutPage() {
                       value={shipping.address}
                       note={shipping.addressNote}
                       onChange={({ address, location, note, components }) =>
-                        setShipping((s) => ({
-                          ...s,
-                          address: address,
-                          addressNote: note ?? s.addressNote,
-                          lat: location?.lat ?? s.lat,
-                          lng: location?.lng ?? s.lng,
-                          ward: components?.ward ?? s.ward,
-                          district: components?.district ?? s.district,
-                          city: components?.city ?? s.city,
-                        }))
-                      }
+    setShipping((s) => ({
+    ...s,
+    address,
+    addressNote: note ?? s.addressNote,
+    lat: location?.lat ?? s.lat,
+    lng: location?.lng ?? s.lng,
+    city: components?.city ?? s.city,
+    // ward/district có thể lưu để show UI, nhưng KHÔNG dùng để build payload BE
+  }))
+}
+
                     />
 
                     <div style={{ marginTop: 8 }}>
