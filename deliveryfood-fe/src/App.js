@@ -23,6 +23,8 @@ import ProtectedRoute from "./components/router/ProtectdRoute";
 import { AdminDashboard } from "./pages/admin/dashboard/AdminDashboard";
 import { ManageOrders } from "./pages/admin/manageOrders/ManageOrders";
 import { ManageAccounts } from "./pages/admin/manageAccounts/ManageAccounts";
+import { NewsPage } from "./pages/user/newsPage/NewsPage";
+import { FaqPage } from "./pages/user/faqPage/FaqPage";
 
 
 function App() {
@@ -77,6 +79,8 @@ function App() {
           <Route path="/checkout" element={<CheckOutPage />} />
           <Route path="/search" element={<SearchPage />} />
           <Route path="/orders" element={<OrderPage />} />
+          <Route path="/news" element={<NewsPage />} />
+          <Route path="/faq" element={<FaqPage />} />
 
           {/* <Route path="/menu/:id" element={<MenuDetailPage />} /> */}
           <Route path="/restaurants" element={<RestaurantsPage />} />

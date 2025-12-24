@@ -25,7 +25,7 @@ export default function Navigation() {
     { name: "Nhà hàng", to: "/restaurants" },
     { name: "Câu hỏi thường gặp", to: "/faq" },
     { name: "Tin tức", to: "/news" },
-    { name: "Liên hệ", to: "/contact" },
+    // { name: "Liên hệ", to: "/contact" },
   ];
 
   const categoryIcons = {
