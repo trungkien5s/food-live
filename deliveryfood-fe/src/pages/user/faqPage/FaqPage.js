@@ -1,6 +1,6 @@
 import React, { useMemo } from "react";
 import Layout from "../../../components/layout/Layout";
-import { Tabs, Collapse, Typography, Space, Input, Tag } from "antd";
+import { Tabs, Collapse, Typography, Space, Input, Tag, Grid } from "antd";
 import {
   SearchOutlined,
   UserOutlined,
@@ -14,6 +14,7 @@ import {
 } from "@ant-design/icons";
 
 const { Title, Text, Paragraph } = Typography;
+const { useBreakpoint } = Grid;
 
 const normalizeVN = (str = "") =>
   str
@@ -46,8 +47,8 @@ const FAQ_DATA = [
         q: "Tôi không nhận được OTP thì phải làm sao?",
         a: (
           <Paragraph>
-            Hãy kiểm tra lại sóng điện thoại, chặn tin nhắn rác, hoặc thử “Gửi lại OTP” sau 60 giây. Nếu vẫn không nhận
-            được, hãy thử đổi sang đăng nhập bằng email (nếu có) hoặc liên hệ hỗ trợ trong mục “Trợ giúp”.
+            Hãy kiểm tra lại sóng điện thoại, chặn tin nhắn rác, hoặc thử "Gửi lại OTP" sau 60 giây. Nếu vẫn không nhận
+            được, hãy thử đổi sang đăng nhập bằng email (nếu có) hoặc liên hệ hỗ trợ trong mục "Trợ giúp".
           </Paragraph>
         ),
         tags: ["OTP", "Sự cố"],
@@ -124,7 +125,7 @@ const FAQ_DATA = [
         a: (
           <Paragraph>
             Tùy cấu hình hệ thống của bạn, thường sẽ có <Text strong>Tiền mặt</Text> và <Text strong>Thẻ/Ví điện tử</Text>
-            . Bạn có thể chọn ở bước “Thanh toán” trước khi xác nhận đặt đơn.
+            . Bạn có thể chọn ở bước "Thanh toán" trước khi xác nhận đặt đơn.
           </Paragraph>
         ),
         tags: ["Cash", "Card"],
@@ -134,7 +135,7 @@ const FAQ_DATA = [
         a: (
           <Paragraph>
             Trong một số trường hợp cổng thanh toán xử lý chậm, đơn có thể chưa ghi nhận. Hãy kiểm tra lịch sử đơn và
-            thông báo thanh toán. Nếu vẫn không thấy đơn, vui lòng gửi ảnh/biên nhận giao dịch trong mục “Trợ giúp” để
+            thông báo thanh toán. Nếu vẫn không thấy đơn, vui lòng gửi ảnh/biên nhận giao dịch trong mục "Trợ giúp" để
             được kiểm tra và hoàn tiền theo quy định.
           </Paragraph>
         ),
@@ -144,7 +145,7 @@ const FAQ_DATA = [
         q: "Tôi có thể yêu cầu xuất hóa đơn không?",
         a: (
           <Paragraph>
-            Nếu FoodLive có hỗ trợ hóa đơn, bạn có thể bật tùy chọn “Yêu cầu hóa đơn” khi đặt đơn hoặc trong chi tiết đơn
+            Nếu FoodLive có hỗ trợ hóa đơn, bạn có thể bật tùy chọn "Yêu cầu hóa đơn" khi đặt đơn hoặc trong chi tiết đơn
             sau khi hoàn tất. Hóa đơn (nếu có) sẽ được gửi qua email đã đăng ký.
           </Paragraph>
         ),
@@ -172,7 +173,7 @@ const FAQ_DATA = [
         a: (
           <Paragraph>
             Nếu đơn chưa có shipper nhận/giao, bạn có thể thử cập nhật địa chỉ trong chi tiết đơn (nếu hệ thống cho phép).
-            Khi đơn đã “Đang giao”, việc đổi địa chỉ có thể bị giới hạn để đảm bảo lộ trình và phí phát sinh.
+            Khi đơn đã "Đang giao", việc đổi địa chỉ có thể bị giới hạn để đảm bảo lộ trình và phí phát sinh.
           </Paragraph>
         ),
         tags: ["Địa chỉ"],
@@ -199,8 +200,8 @@ const FAQ_DATA = [
         a: (
           <Paragraph>
             Mã có thể không áp dụng vì: hết hạn, giới hạn số lượt, không đúng nhà hàng/khung giờ, chưa đạt giá trị tối
-            thiểu, hoặc không áp dụng với một số phương thức thanh toán. Hãy kiểm tra điều kiện hiển thị trong mục “Khuyến
-            mãi” trước khi đặt.
+            thiểu, hoặc không áp dụng với một số phương thức thanh toán. Hãy kiểm tra điều kiện hiển thị trong mục "Khuyến
+            mãi" trước khi đặt.
           </Paragraph>
         ),
         tags: ["Voucher", "Điều kiện"],
@@ -254,7 +255,7 @@ const FAQ_DATA = [
         a: (
           <Paragraph>
             Vui lòng chuẩn bị thông tin: tên nhà hàng, địa chỉ, giờ mở cửa, menu & giá, hình ảnh món, giấy tờ liên quan
-            (nếu cần). Sau đó gửi yêu cầu ở mục “Hợp tác/Đăng ký đối tác” (hoặc liên hệ hotline/email hỗ trợ của FoodLive).
+            (nếu cần). Sau đó gửi yêu cầu ở mục "Hợp tác/Đăng ký đối tác" (hoặc liên hệ hotline/email hỗ trợ của FoodLive).
           </Paragraph>
         ),
         tags: ["Onboarding"],
@@ -263,7 +264,7 @@ const FAQ_DATA = [
         q: "Nhà hàng có thể cập nhật menu/giá thế nào?",
         a: (
           <Paragraph>
-            Nếu bạn có trang quản trị, nhà hàng có thể cập nhật trực tiếp trong “Ứng dụng/Portal nhà hàng”. Nếu chưa có,
+            Nếu bạn có trang quản trị, nhà hàng có thể cập nhật trực tiếp trong "Ứng dụng/Portal nhà hàng". Nếu chưa có,
             hãy gửi yêu cầu chỉnh sửa menu cho bộ phận hỗ trợ kèm danh sách thay đổi.
           </Paragraph>
         ),
@@ -302,6 +303,7 @@ const FAQ_DATA = [
 
 export const FaqPage = () => {
   const [keyword, setKeyword] = React.useState("");
+  const screens = useBreakpoint();
 
   const tabs = useMemo(() => {
     const keyNorm = normalizeVN(keyword);
@@ -309,9 +311,8 @@ export const FaqPage = () => {
     const buildPanels = (items) => {
       const filtered = !keyNorm
         ? items
-        : items.filter(({ q, tags, a }) => {
+        : items.filter(({ q, tags }) => {
           const hay = normalizeVN(`${q} ${(tags || []).join(" ")}`);
-          // không normalize `a` vì là ReactNode; chỉ search theo q + tags
           return hay.includes(keyNorm);
         });
 
@@ -350,13 +351,13 @@ export const FaqPage = () => {
 
   return (
     <Layout>
-      <div className="max-w-[980px] mx-auto px-4 py-6 sm:px-6 sm:py-8 md:py-10">
-        <Space direction="vertical" size={16} style={{ width: "100%" }} className="sm:space-y-5">
+      <div style={{ maxWidth: 1280, margin: "0 auto", padding: screens.xs ? "16px" : "24px" }}>
+        <Space direction="vertical" size={16} style={{ width: "100%" }}>
           <div>
-            <Title level={2} style={{ marginBottom: 4 }} className="text-xl sm:text-2xl md:text-3xl">
+            <Title level={2} style={{ marginBottom: 4 }}>
               Câu hỏi thường gặp
             </Title>
-            <Text type="secondary" className="text-sm sm:text-base">
+            <Text type="secondary">
               Tổng hợp các thắc mắc phổ biến khi sử dụng FoodLive: tài khoản, đặt món, thanh toán, giao hàng, khuyến mãi…
             </Text>
           </div>
@@ -368,20 +369,22 @@ export const FaqPage = () => {
             prefix={<SearchOutlined />}
             placeholder="Tìm kiếm câu hỏi (VD: OTP, hoàn tiền...)"
             size="large"
-            className="text-sm sm:text-base"
           />
 
-          <div style={{ borderRadius: 12, padding: "8px 4px", background: "rgba(0,0,0,0.02)" }} className="sm:p-3">
+          <div style={{ 
+            borderRadius: 12, 
+            padding: screens.xs ? 8 : 12, 
+            background: "rgba(0,0,0,0.02)" 
+          }}>
             <Tabs
               items={tabs}
               tabPosition="top"
               destroyInactiveTabPane
               style={{ background: "transparent" }}
-              className="[&_.ant-tabs-tab]:text-sm [&_.ant-tabs-tab]:sm:text-base"
             />
           </div>
 
-          <Text type="secondary" className="text-xs sm:text-sm">
+          <Text type="secondary" style={{ fontSize: screens.xs ? 12 : 14 }}>
             Không tìm thấy câu trả lời? Vào <Text strong>Trợ giúp</Text> trong ứng dụng FoodLive để gửi yêu cầu hỗ trợ kèm
             ảnh chụp màn hình/biên nhận.
           </Text>

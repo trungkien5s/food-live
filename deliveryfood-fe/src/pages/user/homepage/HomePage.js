@@ -11,7 +11,7 @@ export default function HomePage() {
       {/* <ProductCategories /> */}
       <NewShop />
       <SpecialDealsSection />  
-      <NearbyRestaurants/>
+      {/* <NearbyRestaurants/> */}
       
     </Layout>
   )

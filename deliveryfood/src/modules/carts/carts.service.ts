@@ -1,5 +1,5 @@
 // src/modules/carts/carts.service.ts
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, isValidObjectId } from 'mongoose';
 import { CreateCartDto } from './dto/create-cart.dto';
@@ -88,13 +88,18 @@ export class CartsService {
   }
 
   /** Xoá cart ACTIVE theo (user, restaurant) */
-  async remove(userId: string, restaurantId: string) {
-    const cart = await this.cartModel.findOneAndDelete({
-      user: userId,
-      restaurant: restaurantId,
-      status: 'active',
-    });
-    if (!cart) throw new NotFoundException('CART_NOT_FOUND');
-    return { deleted: true };
+async remove(userId: string, restaurantId: string) {
+  if (!restaurantId || restaurantId === 'null' || restaurantId === 'undefined' || !isValidObjectId(restaurantId)) {
+    throw new BadRequestException('INVALID_RESTAURANT_ID');
   }
+
+  const cart = await this.cartModel.findOneAndDelete({
+    user: userId,
+    restaurant: restaurantId,
+    status: 'active',
+  });
+
+  if (!cart) throw new NotFoundException('CART_NOT_FOUND');
+  return { deleted: true };
+}
 }

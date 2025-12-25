@@ -1,6 +1,6 @@
 import AuthModal from "../../pages/auth/AuthModal";
 import Footer from "./Footer";
-import MainHeader from "./MainHeader";
+import MainHeader from "./header/MainHeader";
 import Navigation from "./Navigation";
 
 export default function Layout({ children }) {
