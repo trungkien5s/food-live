@@ -310,10 +310,10 @@ export const FaqPage = () => {
       const filtered = !keyNorm
         ? items
         : items.filter(({ q, tags, a }) => {
-            const hay = normalizeVN(`${q} ${(tags || []).join(" ")}`);
-            // không normalize `a` vì là ReactNode; chỉ search theo q + tags
-            return hay.includes(keyNorm);
-          });
+          const hay = normalizeVN(`${q} ${(tags || []).join(" ")}`);
+          // không normalize `a` vì là ReactNode; chỉ search theo q + tags
+          return hay.includes(keyNorm);
+        });
 
       return filtered.map((it, idx) => ({
         key: `${idx}`,
@@ -350,13 +350,13 @@ export const FaqPage = () => {
 
   return (
     <Layout>
-      <div style={{ maxWidth: 980, margin: "0 auto", padding: "24px 16px" }}>
-        <Space direction="vertical" size={16} style={{ width: "100%" }}>
+      <div className="max-w-[980px] mx-auto px-4 py-6 sm:px-6 sm:py-8 md:py-10">
+        <Space direction="vertical" size={16} style={{ width: "100%" }} className="sm:space-y-5">
           <div>
-            <Title level={2} style={{ marginBottom: 4 }}>
+            <Title level={2} style={{ marginBottom: 4 }} className="text-xl sm:text-2xl md:text-3xl">
               Câu hỏi thường gặp
             </Title>
-            <Text type="secondary">
+            <Text type="secondary" className="text-sm sm:text-base">
               Tổng hợp các thắc mắc phổ biến khi sử dụng FoodLive: tài khoản, đặt món, thanh toán, giao hàng, khuyến mãi…
             </Text>
           </div>
@@ -366,20 +366,22 @@ export const FaqPage = () => {
             value={keyword}
             onChange={(e) => setKeyword(e.target.value)}
             prefix={<SearchOutlined />}
-            placeholder="Tìm kiếm câu hỏi (VD: OTP, hoàn tiền, đổi địa chỉ, mã khuyến mãi...)"
+            placeholder="Tìm kiếm câu hỏi (VD: OTP, hoàn tiền...)"
             size="large"
+            className="text-sm sm:text-base"
           />
 
-          <div style={{ borderRadius: 12, padding: 12, background: "rgba(0,0,0,0.02)" }}>
+          <div style={{ borderRadius: 12, padding: "8px 4px", background: "rgba(0,0,0,0.02)" }} className="sm:p-3">
             <Tabs
               items={tabs}
               tabPosition="top"
               destroyInactiveTabPane
               style={{ background: "transparent" }}
+              className="[&_.ant-tabs-tab]:text-sm [&_.ant-tabs-tab]:sm:text-base"
             />
           </div>
 
-          <Text type="secondary">
+          <Text type="secondary" className="text-xs sm:text-sm">
             Không tìm thấy câu trả lời? Vào <Text strong>Trợ giúp</Text> trong ứng dụng FoodLive để gửi yêu cầu hỗ trợ kèm
             ảnh chụp màn hình/biên nhận.
           </Text>

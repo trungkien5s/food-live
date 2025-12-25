@@ -29,6 +29,8 @@ import {
   message,
   Modal,
   Flex,
+  Drawer,
+  Menu,
 } from "antd";
 import {
   ShoppingCartOutlined,
@@ -42,6 +44,11 @@ import {
   SearchOutlined,
   EnvironmentOutlined,
   LoadingOutlined,
+  HomeOutlined,
+  InfoCircleOutlined,
+  ShopOutlined,
+  QuestionCircleOutlined,
+  FileTextOutlined,
 } from "@ant-design/icons";
 
 import SearchBar from "../common/SearchBar";
@@ -199,11 +206,11 @@ export default function MainHeader() {
   const [showLocationModal, setShowLocationModal] = useState(false);
 
   // Sử dụng custom hook cho geolocation
-  const { 
-    latitude, 
-    longitude, 
-    address, 
-    loading: locLoading, 
+  const {
+    latitude,
+    longitude,
+    address,
+    loading: locLoading,
     error: locError,
     refetch: refetchLocation
   } = useGeolocationWithLeaflet();
@@ -260,7 +267,7 @@ export default function MainHeader() {
   const handleLogout = async () => {
     try {
       await axios.post(`${apiBase}/auth/logout`);
-    } catch {}
+    } catch { }
     dispatch(logout());
     message.success("Đăng xuất thành công");
   };
@@ -374,13 +381,13 @@ export default function MainHeader() {
 
     if (locError) {
       return (
-        <Button 
-          type="link" 
-          size="small" 
+        <Button
+          type="link"
+          size="small"
           onClick={handleLocationClick}
-          style={{ 
-            padding: '0 4px', 
-            height: 'auto', 
+          style={{
+            padding: '0 4px',
+            height: 'auto',
             color: '#f5222d',
             fontSize: 12,
             display: 'flex',
@@ -400,15 +407,15 @@ export default function MainHeader() {
       const displayTextTrunc = truncateWords(displayText, 3);
       const shortTrunc = truncateWords(address.short, 3);
       const maxWidth = screens.xs ? 120 : (screens.lg ? 200 : 150);
-      
+
       return (
-        <Button 
-          type="link" 
-          size="small" 
+        <Button
+          type="link"
+          size="small"
           onClick={handleLocationClick}
-          style={{ 
-            padding: '0 4px', 
-            height: 'auto', 
+          style={{
+            padding: '0 4px',
+            height: 'auto',
             color: token.colorText,
             maxWidth,
             textAlign: 'left',
@@ -419,10 +426,10 @@ export default function MainHeader() {
           <Space size={4} align="center" style={{ width: '100%' }}>
             <EnvironmentOutlined style={{ color: '#16a34a', fontSize: 12, flexShrink: 0 }} />
             <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
-              <div 
-                style={{ 
-                  overflow: 'hidden', 
-                  textOverflow: 'ellipsis', 
+              <div
+                style={{
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap',
                   fontSize: 12,
                   fontWeight: 500,
@@ -433,12 +440,12 @@ export default function MainHeader() {
                 {displayTextTrunc}
               </div>
               {!screens.xs && address.short !== address.detailed && (
-                <div 
-                  style={{ 
+                <div
+                  style={{
                     fontSize: 11,
                     color: token.colorTextTertiary,
-                    overflow: 'hidden', 
-                    textOverflow: 'ellipsis', 
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
                     whiteSpace: 'nowrap',
                     lineHeight: 1.2
                   }}
@@ -454,13 +461,13 @@ export default function MainHeader() {
     }
 
     return (
-      <Button 
-        type="link" 
-        size="small" 
+      <Button
+        type="link"
+        size="small"
         onClick={handleLocationClick}
-        style={{ 
-          padding: '0 4px', 
-          height: 'auto', 
+        style={{
+          padding: '0 4px',
+          height: 'auto',
           color: '#1890ff',
           fontSize: 12,
           display: 'flex',
@@ -491,10 +498,10 @@ export default function MainHeader() {
           alignItems: 'center'
         }}
       >
-        <div 
-          style={{ 
-            width: '100%', 
-            maxWidth: '1280px', 
+        <div
+          style={{
+            width: '100%',
+            maxWidth: '1280px',
             margin: '0 auto',
             display: 'flex',
             alignItems: 'center',
@@ -537,7 +544,7 @@ export default function MainHeader() {
                   aria-label="Tìm kiếm"
                   onClick={() => navigate('/search')}
                 />
-                
+
                 <Badge count={badgeCount} overflowCount={99} size="small">
                   <Button
                     type="text"
@@ -559,9 +566,9 @@ export default function MainHeader() {
                     </Button>
                   </Dropdown>
                 ) : (
-                  <Button 
-                    type="primary" 
-                    icon={<LoginOutlined />} 
+                  <Button
+                    type="primary"
+                    icon={<LoginOutlined />}
                     onClick={handleLogin}
                     size="small"
                     style={{
@@ -615,16 +622,16 @@ export default function MainHeader() {
                   {/* Logged in user actions */}
                   {isLoggedIn && (
                     <>
-                      <Button 
-                        type="text" 
-                        icon={<OrderedListOutlined />} 
+                      <Button
+                        type="text"
+                        icon={<OrderedListOutlined />}
                         onClick={() => navigate("/orders")}
                         size="small"
                       >
                         {screens.md ? "Đơn hàng" : ""}
                       </Button>
-                      <Button 
-                        type="text" 
+                      <Button
+                        type="text"
                         icon={<MessageOutlined />}
                         size="small"
                       >
@@ -654,7 +661,7 @@ export default function MainHeader() {
                       <Button type="text" size="large">
                         <Space size={4} align="center">
                           <Avatar size={24} icon={<UserOutlined />} />
-                          <span style={{ 
+                          <span style={{
                             maxWidth: screens.lg ? 120 : 80,
                             overflow: "hidden",
                             textOverflow: "ellipsis",
@@ -667,9 +674,9 @@ export default function MainHeader() {
                       </Button>
                     </Dropdown>
                   ) : (
-                    <Button 
-                      type="primary" 
-                      icon={<LoginOutlined />} 
+                    <Button
+                      type="primary"
+                      icon={<LoginOutlined />}
                       onClick={handleLogin}
                       size="large"
                       style={{
@@ -689,10 +696,10 @@ export default function MainHeader() {
 
       {/* Mobile Search Bar and Location (shown when mobile menu is open or always visible) */}
       {screens.xs && (
-        <div 
-          style={{ 
+        <div
+          style={{
             backgroundColor: '#fff',
-            padding: "8px 16px", 
+            padding: "8px 16px",
             borderBottom: `1px solid ${token.colorBorderSecondary}`,
             position: 'sticky',
             top: 64,
@@ -738,6 +745,85 @@ export default function MainHeader() {
           </p>
         </div>
       </Modal>
+
+      {/* Mobile Menu Drawer */}
+      <Drawer
+        title="FoodLive"
+        placement="left"
+        onClose={() => setIsMobileMenuOpen(false)}
+        open={isMobileMenuOpen}
+        width={280}
+      >
+        <Menu
+          mode="vertical"
+          selectedKeys={[location.pathname]}
+          style={{ border: 'none' }}
+          items={[
+            {
+              key: '/',
+              icon: <HomeOutlined />,
+              label: <Link to="/" onClick={() => setIsMobileMenuOpen(false)}>Trang chủ</Link>,
+            },
+            {
+              key: '/about',
+              icon: <InfoCircleOutlined />,
+              label: <Link to="/about" onClick={() => setIsMobileMenuOpen(false)}>Giới thiệu</Link>,
+            },
+            {
+              key: '/restaurants',
+              icon: <ShopOutlined />,
+              label: <Link to="/restaurants" onClick={() => setIsMobileMenuOpen(false)}>Nhà hàng</Link>,
+            },
+            {
+              key: '/faq',
+              icon: <QuestionCircleOutlined />,
+              label: <Link to="/faq" onClick={() => setIsMobileMenuOpen(false)}>Câu hỏi thường gặp</Link>,
+            },
+            {
+              key: '/news',
+              icon: <FileTextOutlined />,
+              label: <Link to="/news" onClick={() => setIsMobileMenuOpen(false)}>Tin tức</Link>,
+            },
+          ]}
+        />
+
+        {isLoggedIn && (
+          <>
+            <div style={{ borderTop: '1px solid #f0f0f0', marginTop: 16, paddingTop: 16 }}>
+              <Menu
+                mode="vertical"
+                style={{ border: 'none' }}
+                items={[
+                  {
+                    key: '/orders',
+                    icon: <OrderedListOutlined />,
+                    label: <Link to="/orders" onClick={() => setIsMobileMenuOpen(false)}>Đơn hàng</Link>,
+                  },
+                  {
+                    key: '/profile',
+                    icon: <UserOutlined />,
+                    label: <Link to="/profile" onClick={() => setIsMobileMenuOpen(false)}>Hồ sơ</Link>,
+                  },
+                ]}
+              />
+            </div>
+            <div style={{ borderTop: '1px solid #f0f0f0', marginTop: 16, paddingTop: 16 }}>
+              <Button
+                type="text"
+                icon={<LogoutOutlined />}
+                onClick={() => {
+                  setIsMobileMenuOpen(false);
+                  handleLogout();
+                }}
+                block
+                danger
+              >
+                Đăng xuất
+              </Button>
+            </div>
+          </>
+        )}
+      </Drawer>
 
       <CartDrawer
         open={isCartOpen && isLoggedIn}

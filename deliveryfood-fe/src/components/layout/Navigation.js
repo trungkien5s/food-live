@@ -65,23 +65,23 @@ export default function Navigation() {
     if (nextOpen && !loaded && !loading) fetchCategories();
   };
 
-const categories = useMemo(() => {
-  if (!Array.isArray(rawCategories) || rawCategories.length === 0) return [];
-  return rawCategories.map((category) => ({
-    id: category._id || category.id,
-    name: category.name || "Chưa đặt tên",
-    slug:
-      category.slug ||
-      category.name?.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "") ||
-      category._id,
-    icon: categoryIcons[category.name],
-  }));
-}, [rawCategories]);
+  const categories = useMemo(() => {
+    if (!Array.isArray(rawCategories) || rawCategories.length === 0) return [];
+    return rawCategories.map((category) => ({
+      id: category._id || category.id,
+      name: category.name || "Chưa đặt tên",
+      slug:
+        category.slug ||
+        category.name?.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "") ||
+        category._id,
+      icon: categoryIcons[category.name],
+    }));
+  }, [rawCategories]);
 
-const goToCategory = (id) => {
-  setOpen(false);
-  navigate(`/categories/${id}`);
-};
+  const goToCategory = (id) => {
+    setOpen(false);
+    navigate(`/categories/${id}`);
+  };
 
 
   const selectedTopKey = useMemo(() => {
@@ -129,9 +129,10 @@ const goToCategory = (id) => {
           style={{
             display: "flex",
             alignItems: "center",
-            gap: 16,
-            minHeight: 52,
+            gap: 12,
+
           }}
+          className="sm:gap-16 min-h-[52px]"
         >
           {/* Dropdown danh mục */}
           <Dropdown
@@ -140,7 +141,7 @@ const goToCategory = (id) => {
             onOpenChange={handleOpenChange}
             placement="bottomLeft"
             arrow
-            overlayStyle={{ minWidth: 320 }}
+            overlayStyle={{ minWidth: 280, maxWidth: 320 }}
             menu={{ items: categoryMenuItems }}
             dropdownRender={(menu) => (
               <div
@@ -206,33 +207,37 @@ const goToCategory = (id) => {
               size="middle"
               icon={<MenuIcon size={16} />}
               style={{ backgroundColor: "#16a34a", borderColor: "#16a34a" }}
+              className="text-sm sm:text-base"
             >
-              Danh mục món ăn <ChevronDown size={14} style={{ marginLeft: 6 }} />
+              <span className="hidden sm:inline">Danh mục món ăn</span>
+              <span className="inline sm:hidden">Danh mục</span>
+              <ChevronDown size={14} style={{ marginLeft: 6 }} className="hidden sm:inline" />
             </Button>
           </Dropdown>
 
-          {/* Top navigation */}
+          {/* Top navigation - ẩn trên mobile */}
           <ConfigProvider
-  theme={{
-    components: {
-      Menu: {
-        itemSelectedColor: '#16a34a',
-        itemSelectedBg: 'transparent',
-        horizontalItemSelectedColor: '#16a34a',
-        itemHoverColor: '#16a34a',
-        itemActiveBg: 'transparent',
-      }
-    }
-  }}
->
-  <div style={{ flex: 1, minWidth: 0 }}>
-    <AntMenu
-      mode="horizontal"
-      selectedKeys={[selectedTopKey]}
-      items={topMenuItems}
-    />
-  </div>
-</ConfigProvider>
+            theme={{
+              components: {
+                Menu: {
+                  itemSelectedColor: '#16a34a',
+                  itemSelectedBg: 'transparent',
+                  horizontalItemSelectedColor: '#16a34a',
+                  itemHoverColor: '#16a34a',
+                  itemActiveBg: 'transparent',
+                }
+              }
+            }}
+          >
+            <div className="hidden md:block" style={{ flex: 1, minWidth: 0 }}>
+              <AntMenu
+                mode="horizontal"
+                selectedKeys={[selectedTopKey]}
+                items={topMenuItems}
+                style={{ fontSize: 14 }}
+              />
+            </div>
+          </ConfigProvider>
         </div>
       </div>
     </div>

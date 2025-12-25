@@ -9,8 +9,8 @@ export default function Layout({ children }) {
       <div className="sticky top-0 z-50">
       {/* <SecondaryHeader /> */}
         <MainHeader   />
-        <Navigation />
       </div>
+      <Navigation />
       <div className="flex">
         {/* <Sidebar /> */}
         <main className="flex-1 relative">
